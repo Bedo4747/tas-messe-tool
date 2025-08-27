@@ -1,26 +1,78 @@
 @import "tailwindcss";
 
+/* TAS Brand Colors */
 :root {
+  --tas-dark-blue: #002045; /* Oxford Blue */
+  --tas-turquoise: #23f0c7; /* Aquamarine */
+  --tas-dark-grey: #312c2e; /* Raisin Black */
+  --tas-grey: #a7a7a7; /* Silver */
+  --tas-light-grey: #d9d9d9; /* Platinum */
+  --tas-black: #080a09; /* Night */
+
   --background: #ffffff;
-  --foreground: #171717;
+  --foreground: var(--tas-black);
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-brand: var(--tas-dark-blue);
+  --color-accent: var(--tas-turquoise);
+  --color-muted: var(--tas-grey);
+  --color-muted-2: var(--tas-light-grey);
+  --font-sans: var(--font-work-sans);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0a0f14;
+    --foreground: #e6e6e6;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-work-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Next.js Dev Indicator unten links ausblenden */
+#__next-build-watcher,
+#__next-route-announcer,
+[data-nextjs-scroll-focus-boundary] + div[style*="position: fixed"][style*="bottom: 0px"][style*="left: 0px"] {
+  display: none !important;
+}
+
+.tas-btn-primary {
+  @apply rounded-md px-4 py-2 font-medium text-white;
+  background-color: var(--tas-dark-blue);
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+.tas-btn-primary:hover {
+  background-color: var(--tas-turquoise);
+  color: var(--tas-dark-blue);
+}
+
+.shadow-xl {
+  box-shadow: 0 10px 25px rgba(0,0,0,0.08), 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.tas-chip {
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 border text-sm cursor-pointer select-none;
+  border-color: var(--tas-light-grey);
+  transition: background-color 200ms ease, color 200ms ease, border-color 200ms ease;
+}
+
+.tas-chip-active {
+  color: #001531;
+  background-color: #e6f8f3;
+  border-color: var(--tas-turquoise);
+}
+
+.tas-chip:hover,
+.tas-chip-active:hover {
+  background-color: var(--tas-turquoise);
+  border-color: var(--tas-turquoise);
+  color: var(--tas-dark-blue);
 }

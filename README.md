@@ -1,24 +1,31 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+Dies ist ein Messeplaner-Tool auf Basis von Next.js. Es generiert nach einem Fragebogen einen personalisierten PDF-Plan mit OpenAI und sendet ihn per E-Mail.
 
 ## Getting Started
 
-First, run the development server:
+Entwicklungsserver starten:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Öffnen Sie [http://localhost:3000](http://localhost:3000) im Browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Konfiguration: Legen Sie `.env.local` an mit
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+OPENAI_API_KEY=...
+SMTP_HOST=smtp.office365.com
+SMTP_PORT=587
+SMTP_USER=absender@domain.tld
+MAIL_FROM="TAS Messeplaner <absender@domain.tld>"
+
+# OAuth2 für Microsoft 365 SMTP.Send (Client Credentials)
+OAUTH_TENANT_ID=...
+OAUTH_CLIENT_ID=...
+OAUTH_CLIENT_SECRET=...
+```
+
+Work Sans ist für Web und PDF eingebunden. Markenfarben: Dark Blue #002045, Turquoise #23F0C7, Grau-Töne wie im Styleguide. Logo unter `public/tas_logo.png`.
 
 ## Learn More
 
