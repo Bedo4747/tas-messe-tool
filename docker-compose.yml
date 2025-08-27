@@ -1,0 +1,64 @@
+version: "3.9"
+
+services:
+  traefik:
+    image: traefik:v3.1
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      # Force HTTP -> HTTPS
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      - --entrypoints.web.http.redirections.entryPoint.scheme=https
+      # Let's Encrypt HTTP-01 challenge (uses port 80)
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
+      - --certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      # (Optional) dashboard - protect it behind auth in production
+      - --api.dashboard=true
+    ports:
+      - "80:80"
+      - "443:443"
+      # (Optional) expose dashboard on 8080 locally only:
+      # - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - web
+
+  app:
+    build:
+      context: .
+    environment:
+      NODE_ENV: production
+      # Put your public base URL if your app needs it:
+      # NEXT_PUBLIC_SITE_URL: https://${DOMAIN}
+    labels:
+      - traefik.enable=true
+
+      # Router (HTTPs)
+      - traefik.http.routers.app.rule=Host(`${DOMAIN}`)
+      - traefik.http.routers.app.entrypoints=websecure
+      - traefik.http.routers.app.tls=true
+      - traefik.http.routers.app.tls.certresolver=le
+
+      # Service -> internal container port
+      - traefik.http.services.app.loadbalancer.server.port=3000
+
+      # (Optional) HSTS & security headers
+      - traefik.http.middlewares.sec-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.sec-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.sec-headers.headers.stsPreload=true
+      - traefik.http.routers.app.middlewares=sec-headers@docker
+
+    depends_on:
+      - traefik
+    networks:
+      - web
+
+networks:
+  web:
+    driver: bridge
