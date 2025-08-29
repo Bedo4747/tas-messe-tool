@@ -16,27 +16,39 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# If you need runtime env vars, keep them as process.env reads; build-time
-# values can be provided via --build-arg or .env
 RUN npm run build
 
-# ---- production runner ----
 # ---- production runner ----
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
+# use /tmp for Next cache (writable everywhere)
 ENV NEXT_CACHE_DIR=/tmp/next-cache
 
+# Create non-root runtime user
 RUN addgroup -g 1001 nodejs && adduser -u 1001 -G nodejs -D nextjs
 
+# Minimal files from the build
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-RUN mkdir -p /tmp/next-cache && chown -R nextjs:nodejs /tmp/next-cache
+# --- entrypoint that fixes perms at runtime (after any bind mounts) ---
+# run as root so we can chown, then drop to nextjs
+COPY <<'SH' /entrypoint.sh
+#!/bin/sh
+set -e
+# Ensure both possible cache locations exist
+mkdir -p /app/.next/cache /tmp/next-cache
+# Fix ownership (ignore errors if already owned)
+chown -R nextjs:nodejs /app/.next /tmp/next-cache 2>/dev/null || true
+# Drop privileges and exec the passed command (from CMD)
+exec su -s /bin/sh nextjs -c "$*"
+SH
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 3000
-USER nextjs
+# Stay root for the entrypoint; it will drop to nextjs
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "server.js"]
-
