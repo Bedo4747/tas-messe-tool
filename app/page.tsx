@@ -72,68 +72,74 @@ export default function Home() {
     mustSee: [],
   });
 
-   async function sendMesseplanEmail(
-  data: { email: string },
-  pdfBytes: Uint8Array
-) {
-  const SERVICE_ID = 'service_prmgrzf';
-  const TEMPLATE_ID = 'template_52c1f0x';
-  const PUBLIC_KEY = 'MomY4mAH_xZr1KbyP';
+  async function sendMesseplanEmail(
+    data: QuestionnaireData,
+    pdfBytes: Blob
+  ) {
+    const SERVICE_ID = 'service_prmgrzf';
+    const TEMPLATE_ID = 'template_52c1f0x';
+    const PUBLIC_KEY = 'MomY4mAH_xZr1KbyP';
 
-  if (typeof window === 'undefined' || typeof document === 'undefined') {
-    throw new Error('sendForm must run in the browser (no SSR/API route).');
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      throw new Error('sendForm must run in the browser (no SSR/API route).');
+    }
+
+    if (!data.email) {
+      throw new Error('email not set.');
+    }
+
+
+    emailjs.init(PUBLIC_KEY);
+
+    const form = document.createElement('form');
+    form.style.display = 'none';
+    form.enctype = 'multipart/form-data';
+    document.body.appendChild(form);
+
+    const addHidden = (name: string, value: string) => {
+      const input = document.createElement('input');
+      input.type = 'hidden';
+      input.name = name;
+      input.value = value;
+      form.appendChild(input);
+    };
+
+
+    addHidden('to_email', data.email);
+    addHidden('subject', 'Ihr persönlicher Messeplan');
+    addHidden('message', 'Vielen Dank! Wir haben Ihre Angaben erhalten. Ihr persönlicher Messeplan wird jetzt erstellt.');
+
+    const file = new File([pdfBytes], 'Messeplan.pdf', { type: 'application/pdf' });
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.name = 'my_file'; 
+    fileInput.accept = 'application/pdf';
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+    form.appendChild(fileInput);
+
+    const fd = new FormData(form);
+    let varBytes = 0;
+    for (const [k, v] of fd.entries()) {
+      if (v instanceof File) continue;
+      varBytes += new TextEncoder().encode(String(v)).length;
+    }
+    console.log('Template variables size (bytes):', varBytes); 
+    console.log('Attachment size (MB):', (file.size / (1024 * 1024)).toFixed(2));
+
+    if (file.size > 10 * 1024 * 1024) {
+      console.warn('PDF likely too large for mail providers (>10MB). Consider compressing.');
+    }
+
+    try {
+      const res = await emailjs.sendForm(SERVICE_ID, TEMPLATE_ID, form, PUBLIC_KEY);
+      return res;
+    } finally {
+      document.body.removeChild(form);
+    }
   }
-
-  emailjs.init(PUBLIC_KEY);
-
-  const form = document.createElement('form');
-  form.style.display = 'none';
-  form.enctype = 'multipart/form-data';
-  document.body.appendChild(form);
-
-  const addHidden = (name: string, value: string) => {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = name;
-    input.value = value;
-    form.appendChild(input);
-  };
-
-  addHidden('to_email', data.email);
-  addHidden('subject', 'Ihr persönlicher Messeplan');
-  addHidden('message', 'Vielen Dank! Wir haben Ihre Angaben erhalten. Ihr persönlicher Messeplan wird jetzt erstellt.');
-
-  const file = new File([pdfBytes], 'Messeplan.pdf', { type: 'application/pdf' });
-  const fileInput = document.createElement('input');
-  fileInput.type = 'file';
-  fileInput.name = 'my_file'; 
-  fileInput.accept = 'application/pdf';
-
-  const dt = new DataTransfer();
-  dt.items.add(file);
-  fileInput.files = dt.files;
-  form.appendChild(fileInput);
-
-  const fd = new FormData(form);
-  let varBytes = 0;
-  for (const [k, v] of fd.entries()) {
-    if (v instanceof File) continue;
-    varBytes += new TextEncoder().encode(String(v)).length;
-  }
-  console.log('Template variables size (bytes):', varBytes); 
-  console.log('Attachment size (MB):', (file.size / (1024 * 1024)).toFixed(2));
-
-  if (file.size > 10 * 1024 * 1024) {
-    console.warn('PDF likely too large for mail providers (>10MB). Consider compressing.');
-  }
-
-  try {
-    const res = await emailjs.sendForm(SERVICE_ID, TEMPLATE_ID, form, PUBLIC_KEY);
-    return res;
-  } finally {
-    document.body.removeChild(form);
-  }
-}
 
   const ALL_EXHIBITOR_NAMES = useMemo(() => {
     return Array.from(
