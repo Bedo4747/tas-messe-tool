@@ -9,56 +9,8 @@ import { EXHIBITORS_DB, Exhibitor } from "@/lib/data/exhibitors_db";
 import { selectEventsForUser } from "@/lib/server/events";
 import nodemailer from "nodemailer";
 
-// --- Microsoft Graph helper (App-Registrierung ohne zusätzlichen Dienst) ---
-async function getMsGraphToken() {
-  const tenant = process.env.MS_TENANT_ID;
-  const clientId = process.env.MS_CLIENT_ID;
-  const clientSecret = process.env.MS_CLIENT_SECRET;
-  if (!tenant || !clientId || !clientSecret) return null;
-  const form = new URLSearchParams();
-  form.set("client_id", clientId);
-  form.set("client_secret", clientSecret);
-  form.set("grant_type", "client_credentials");
-  form.set("scope", "https://graph.microsoft.com/.default");
-  const resp = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: form.toString(),
-  });
-  if (!resp.ok) return null;
-  const json = await resp.json();
-  return (json as any).access_token as string | undefined;
-}
 
-async function sendViaMsGraph(recipient: string, pdfBytes: Uint8Array) {
-  const accessToken = await getMsGraphToken();
-  const sender = process.env.MS_SENDER_UPN; // z. B. postfach@domain.tld
-  if (!accessToken || !sender) return false;
-  const base64Pdf = Buffer.from(pdfBytes).toString("base64");
-  const saveToSent = (process.env.MS_SAVE_TO_SENT || "1") !== "0";
-  const body = {
-    message: {
-      subject: "Ihr persönlicher Messeplan",
-      body: { contentType: "Text", content: "Anbei Ihr persönlicher Messeplan als PDF." },
-      toRecipients: [{ emailAddress: { address: recipient } }],
-      attachments: [
-        {
-          "@odata.type": "#microsoft.graph.fileAttachment",
-          name: "messeplan.pdf",
-          contentType: "application/pdf",
-          contentBytes: base64Pdf,
-        },
-      ],
-    },
-    saveToSentItems: saveToSent,
-  } as const;
-  const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  return resp.ok;
-}
+
 
 const schema = z.object({
   email: z.string().email().optional(),
@@ -503,36 +455,6 @@ export async function POST(req: NextRequest) {
 
     const pdfBytes = new Uint8Array(finalBytes);
 
-    // Falls E-Mail übergeben → per SMTP senden statt herunterladen
-    const recipient = (parsed.data.email || (parsed.data.data as any)?.email || parsed.data.email) as string | undefined;
-    if (recipient) {
-      try {
-        // 1) Bevorzugt: Microsoft Graph (App-Registrierung, kein zusätzlicher Dienst)
-        const ok = await sendViaMsGraph(recipient, pdfBytes);
-        if (!ok) {
-          // 2) Fallback: SMTP (falls konfiguriert)
-          const host = process.env.SMTP_HOST as string;
-          const port = parseInt(process.env.SMTP_PORT || "587", 10);
-          const user = process.env.SMTP_USER as string;
-          const pass = process.env.SMTP_PASS as string;
-          const from = process.env.MAIL_FROM as string;
-          if (!host || !user || !pass || !from) throw new Error("Graph und SMTP nicht konfiguriert");
-          const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } });
-          await transporter.sendMail({
-            from,
-            to: recipient,
-            subject: "Ihr persönlicher Messeplan",
-            text: "Anbei Ihr persönlicher Messeplan als PDF.",
-            attachments: [{ filename: "messeplan.pdf", content: Buffer.from(pdfBytes), contentType: "application/pdf" }],
-          });
-        }
-        console.info(`[generate-plan] PDF an ${recipient} versendet (Graph${ok ? "" : "+SMTP Fallback"}).`);
-      } catch (e) {
-        console.error("[generate-plan] E-Mail Versand fehlgeschlagen:", e);
-        return NextResponse.json({ error: "E-Mail Versand fehlgeschlagen" }, { status: 500 });
-      }
-    }
-
     // Persistieren (best-effort)
     try {
       if (supabase) {
@@ -542,7 +464,7 @@ export async function POST(req: NextRequest) {
         await supabase.from("messe_plans").insert({
           lang: (req.headers.get("accept-language") || "de").split(",")[0]?.startsWith("de") ? "de" : "en",
           name: (data as any).name || null,
-          email: recipient || null,
+          email: data.email || null,
           role: data.role,
           goal: data.goal,
           exhibitors_text: data.exhibitorsText,
@@ -567,10 +489,6 @@ export async function POST(req: NextRequest) {
     }
     console.timeEnd("pdf_render");
     console.info("[generate-plan] DONE (PDF gesendet)");
-    // Bei E-Mail-Versand nur 200/JSON zurückgeben, sonst PDF (Fallback)
-    if (recipient) {
-      return NextResponse.json({ ok: true });
-    }
     return new NextResponse(pdfBytes as unknown as BodyInit, { status: 200, headers: { "Content-Type": "application/pdf" } });
   } catch (e) {
     console.error("[generate-plan] ERROR:", e);

@@ -12,7 +12,7 @@ type QuestionnaireData = {
   exhibitorsText: string;
   days: string[];
   mustSee: string[];
-  email: string; // ✅ added
+  email: string; 
 };
 
 const ROLES_DICT: Record<"de"|"en", string[]> = {
@@ -71,7 +71,7 @@ export default function Home() {
     exhibitorsText: "",
     days: [],
     mustSee: [],
-    email: "", // ✅ added
+    email: "", 
   });
 
    async function sendMesseplanEmail(
@@ -82,15 +82,12 @@ export default function Home() {
   const TEMPLATE_ID = 'template_52c1f0x';
   const PUBLIC_KEY = 'MomY4mAH_xZr1KbyP';
 
-  // 1) Must run on the client (browser)
   if (typeof window === 'undefined' || typeof document === 'undefined') {
     throw new Error('sendForm must run in the browser (no SSR/API route).');
   }
 
-  // 2) Init (safe to call more than once)
   emailjs.init(PUBLIC_KEY);
 
-  // 3) Create a hidden form and ATTACH it to the DOM
   const form = document.createElement('form');
   form.style.display = 'none';
   form.enctype = 'multipart/form-data';
@@ -104,16 +101,14 @@ export default function Home() {
     form.appendChild(input);
   };
 
-  // 4) Only tiny variables
   addHidden('to_email', data.email);
   addHidden('subject', 'Ihr persönlicher Messeplan');
   addHidden('message', 'Vielen Dank! Wir haben Ihre Angaben erhalten. Ihr persönlicher Messeplan wird jetzt erstellt.');
 
-  // 5) Build the File and programmatically set it on a file input
   const file = new File([pdfBytes], 'Messeplan.pdf', { type: 'application/pdf' });
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
-  fileInput.name = 'my_file'; // must equal template parameter
+  fileInput.name = 'my_file'; 
   fileInput.accept = 'application/pdf';
 
   const dt = new DataTransfer();
@@ -121,27 +116,23 @@ export default function Home() {
   fileInput.files = dt.files;
   form.appendChild(fileInput);
 
-  // 6) Diagnostics (optional but useful)
   const fd = new FormData(form);
   let varBytes = 0;
   for (const [k, v] of fd.entries()) {
     if (v instanceof File) continue;
     varBytes += new TextEncoder().encode(String(v)).length;
   }
-  console.log('Template variables size (bytes):', varBytes); // should be tiny (<1KB)
+  console.log('Template variables size (bytes):', varBytes); 
   console.log('Attachment size (MB):', (file.size / (1024 * 1024)).toFixed(2));
 
-  // If > ~10MB, many providers will bounce it. Consider compressing or sending a link instead.
   if (file.size > 10 * 1024 * 1024) {
     console.warn('PDF likely too large for mail providers (>10MB). Consider compressing.');
   }
 
   try {
-    // 7) Send the form. Pass PUBLIC_KEY again for certainty.
     const res = await emailjs.sendForm(SERVICE_ID, TEMPLATE_ID, form, PUBLIC_KEY);
     return res;
   } finally {
-    // 8) Clean up DOM
     document.body.removeChild(form);
   }
 }
@@ -166,14 +157,12 @@ export default function Home() {
     setStep("download");
   }
 
-  // Basic email check
   const isEmailValid = /^\S+@\S+\.\S+$/.test(data.email || "");
 
   async function handleSend() {
     try {
       setLoading(true);
 
-      // 1) Generate and download the PDF
       const res = await fetch("/api/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -181,16 +170,7 @@ export default function Home() {
       });
       if (!res.ok) throw new Error("Fehler beim Erstellen");
       const blob = await res.blob();
-      // const url = window.URL.createObjectURL(blob);
-      // const a = document.createElement("a");
-      // a.href = url;
-      // a.download = "messeplan.pdf";
-      // document.body.appendChild(a);
-      // a.click();
-      // a.remove();
-      // window.URL.revokeObjectURL(url);
-    
-      // 1) Send a generic email via EmailJS
+
       await sendMesseplanEmail(data, blob)
 
       setStep("done");
@@ -203,9 +183,7 @@ export default function Home() {
   }
 
   const isFormValid = data.role && data.goal && data.days.length > 0;
-  const isEmailValid = !!data.email && /.+@.+\..+/.test(data.email);
 
-  // einfache Übersetzungen
   const t = (key: string) => {
     const dict: Record<string, Record<string, string>> = {
       de: {
