@@ -61,7 +61,7 @@ export default function Home() {
   const [step, setStep] = useState<"form" | "download" | "done">("form");
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [lang, setLang] = useState<"de" | "en">("de");
+  const [lang, setLang] = useState<"de" | "en">("en");
   const [data, setData] = useState<QuestionnaireData>({
     name: "",
     email: "",
@@ -164,26 +164,23 @@ export default function Home() {
   const isEmailValid = /^\S+@\S+\.\S+$/.test(data.email || "");
 
   async function handleSend() {
-    try {
-      setLoading(true);
-
-      const res = await fetch("/api/generate-plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: data.email, data }),
-      });
-      if (!res.ok) throw new Error("Fehler beim Erstellen");
-      const blob = await res.blob();
-
-      await sendMesseplanEmail(data, blob)
-
-      setStep("done");
-    } catch (err) {
-      console.error(err);
-      alert("Senden fehlgeschlagen. Bitte erneut versuchen.");
-    } finally {
-      setLoading(false);
-    }
+    setStep("done"); // sofort bestätigen
+    void (async () => {
+      try {
+        const res = await fetch("/api/generate-plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: data.email, data, lang }),
+        });
+        if (!res.ok) throw new Error("PDF generation failed");
+        const blob = await res.blob();
+        console.log("Blob received");
+        await sendMesseplanEmail(data, blob); // EmailJS bleibt im Browser
+        console.log("Email sent");
+      } catch (e) {
+        console.error(e);
+      }
+    })();
   }
 
   const isFormValid = data.role && data.goal && data.days.length > 0;
@@ -459,10 +456,10 @@ export default function Home() {
           {step === "done" && (
             <section className="space-y-4 text-center">
               <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>
-                Vielen Dank! Ihr persönlicher Messeplan ist unterwegs.
+                {lang === "de" ? "Vielen Dank! Ihr persönlicher Messeplan ist unterwegs." : "Thank you! Your personal trade fair plan is on its way."}
               </h2>
               <p className="text-sm" style={{ color: "var(--tas-grey)" }}>
-                Bitte prüfen Sie Ihren Posteingang. Falls nichts ankommt, schauen Sie im Spam-Ordner nach.
+                {lang === "de" ? "Bitte prüfen Sie Ihren Posteingang. Falls nichts ankommt, schauen Sie im Spam-Ordner nach." : "Please check your inbox. If nothing arrives, check your spam folder."}
               </p>
             </section>
           )}

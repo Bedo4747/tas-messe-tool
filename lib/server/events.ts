@@ -9,14 +9,29 @@ function dayLabelFromDate(date: string): string {
   return `${dd}. September`;
 }
 
+function dayLabelEnFromDate(date: string): string {
+  // erwartet YYYY-MM-DD → gibt z. B. "September 9" zurück
+  const m = date.match(/\d{4}-(\d{2})-(\d{2})/);
+  if (!m) return "";
+  const d = String(parseInt(m[2 + 0] ? m[2] : m[2], 10)); // robust gegen führende Nullen
+  // m[2] ist der Tag; in obiger Regex ist m[2] tatsächlich der Tag (dd)
+  const dd = String(parseInt(m[2], 10));
+  return `September ${dd}`;
+}
+
 export async function selectEventsForUser(
   days: string[],
   interestText: string,
   client: OpenAI
 ): Promise<EventItem[]> {
   // Tage ("09. September" etc.) in Tag-Strings umwandeln
-  const allowedDays = new Set(days.map((d) => d.trim()));
-  const filtered = EVENTS_DB.filter((e) => allowedDays.has(dayLabelFromDate(e.date)));
+  const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const allowedDays = new Set(days.map((d) => normalize(d)));
+  const filtered = EVENTS_DB.filter((e) => {
+    const de = normalize(dayLabelFromDate(e.date));
+    const en = normalize(dayLabelEnFromDate(e.date));
+    return allowedDays.has(de) || allowedDays.has(en);
+  });
   if (filtered.length === 0) return [];
 
   // In parallelen Chunks an GPT-5: nur Felder date/time/title/summary

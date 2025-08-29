@@ -14,6 +14,7 @@ import nodemailer from "nodemailer";
 
 const schema = z.object({
   email: z.string().email().optional(),
+  lang: z.enum(["de", "en"]).optional(),
   data: z.object({
     name: z.string().optional().default(""),
     email: z.string().optional().default(""),
@@ -27,17 +28,20 @@ const schema = z.object({
 
 type PromptItem = { title: string; prompt: string };
 
-function buildPrompts(input: z.infer<typeof schema>["data"]): PromptItem[] {
-  return [
-    {
-      title: "Besuchsstrategie",
-      prompt: `Aufgabe:
+
+
+function buildPrompts(input: z.infer<typeof schema>["data"], lang: "de" | "en"): PromptItem[] {
+  const unknownRole = lang === "de" ? "Unbekannt" : "Unknown";
+  const unknownGoal = lang === "de" ? "Unbekannt" : "Unknown";
+  const roleOut = input.role ?? unknownRole;
+  const goalOut = input.goal ?? unknownGoal;
+  const promptDe = `Aufgabe:
 Erzeuge aus Rolle und Messeziel einen ultra-kompakten Action Plan auf Deutsch. Nutze ausschließlich diese Eingaben. Bullets im Objekt-Verb-Stil (Objekt zuerst, Verb am Ende), max. 12 Wörter, kein Punkt am Ende. Verwende das Bullet-Zeichen „• “. Gib nur das unten definierte Format aus, ohne Zusatztexte oder Platzhalter. Sortiere Bullets nach Impact. Vermeide Doppelungen.
 Eingaben:
-    •    Rolle: ${input.role ?? "Unbekannt"}
-    •    Ziel: ${input.goal ?? "Unbekannt"}
+    •    Rolle: ${roleOut}
+    •    Ziel: ${goalOut}
 Ausgabeformat (streng, exakt einhalten):
-Titel: Action Plan – ${input.role ?? "Unbekannt"} | Ziel: ${input.goal ?? "Unbekannt"}
+Titel: Action Plan – ${roleOut} | Ziel: ${goalOut}
 Action Plan:
 Vor:
 • <max. 3 Kernbullets>
@@ -74,13 +78,50 @@ Regeln (anwenden, nicht ausgeben):
     ◦    Medienarbeit: 2 Interviewslots sichern, 1 Exklusivzitat erhalten, 1 Veröffentlichung planen
     ◦    Inspiration & Überblick: 5 Highlights dokumentieren, 3 Trends priorisieren, 1 Entscheidungsempfehlung formulieren
     •    Keine Marken, keine Füllwörter, keine Wiederholungen, nur Wichtigstes
-    •    Jede Zeile trimmen, max. 12 Wörter, keine Endpunkte`,
-    },
-    // Ausstellerempfehlungen generieren wir unten direkt aus der Datenbank
+    •    Jede Zeile trimmen, max. 12 Wörter, keine Endpunkte`;
+  const promptEn = `Task:
+Create an ultra-compact action plan strictly from role and fair goal. Use only these inputs. Bullets in object-verb style (object first, verb at the end), max 12 words, no period. Use the bullet character "• ". Output exactly the format below, no extra text or placeholders. Sort bullets by impact. Avoid duplicates.
+Inputs:
+    •    Role: ${roleOut}
+    •    Goal: ${goalOut}
+Output format (strict, exact):
+Title: Action plan – ${roleOut} | Goal: ${goalOut}
+Action plan:
+Before:
+• <max. 3 core bullets>
+• <…>
+• <…>
+During:
+• <max. 5 core bullets>
+• <…>
+• <…>
+• <…>
+• <…>
+After:
+• <max. 3 core bullets>
+• <…>
+• <…>
+KPIs – Top 3:
+• <KPI 1, measurable and realistic>
+• <KPI 2, measurable and realistic>
+• <KPI 3, measurable and realistic>
+Rules (apply, do not output):
+    •    Each line ends with the verb (e.g., "prepare RFQ question set")
+    •    Use numbers/deadlines (Top-3, 48 hours, 14 days)
+    •    Realistic per-day KPIs, adapted to role/goal
+    ◦    C-level: 1–3 high-impact KPIs (exclusive meetings, pilot decision)
+    ◦    Dept head / PM / Specialist: 3–5 actionable KPIs (demos, PoCs, interfaces)
+    ◦    Plant/site lead: 2–4 KPIs on uptime/SLAs
+    ◦    Students / Young professional: 3–5 KPIs (HR talks, follow-ups, applications)
+    ◦    Press / Media: 2–4 KPIs (interviews, quotes, publications)
+    •    No brands, no filler, only essentials
+    •    Trim each line, max 12 words, no periods`;
+  return [
     {
-      title: "Tagesplanung",
-      prompt: `Tage: ${input.days.join(", ")}. Erstelle einen kompakten Tagesplan mit Zeitblöcken (Vormittag/Nachmittag) und Aktivitäten. Berücksichtige Pflichtstände: ${input.mustSee.join(", ") || "keine"}.`,
+      title: lang === "de" ? "Besuchsstrategie" : "Visit strategy",
+      prompt: lang === "de" ? promptDe : promptEn,
     },
+    // Exhibitor sections are built from the DB below
   ];
 }
 
@@ -91,7 +132,11 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json({ error: "Ungültige Eingaben" }, { status: 400 });
     }
-    const { data } = parsed.data;
+    const { data, lang: langParam } = parsed.data;
+    const acceptHeader = (req.headers.get("accept-language") || "").split(",")[0] || "";
+    const fallbackLang = acceptHeader.startsWith("de") ? "de" : "en";
+    const lang = ((langParam ?? fallbackLang) as "de" | "en");
+    console.info(`[generate-plan] Sprache gewählt: ${lang} (param=${langParam ?? "-"}, accept=${acceptHeader || "-"})`);
 
     const openaiApiKey = process.env.OPENAI_API_KEY;
     if (!openaiApiKey) {
@@ -119,7 +164,7 @@ export async function POST(req: NextRequest) {
     let structCompany: string | undefined = undefined;
     try {
       if (openaiApiKey && interestText) {
-        console.info(`[generate-plan] Extractor → ${EXTRACTOR_MODEL} (Keywords/Phrasen) …`);
+        console.info(`[generate-plan] Extractor → ${EXTRACTOR_MODEL} (Keywords/Phrases, lang=${lang}) …`);
         console.time("extractor_gpt5");
         const extractor = await client.chat.completions.create({
           model: EXTRACTOR_MODEL,
@@ -127,12 +172,16 @@ export async function POST(req: NextRequest) {
             {
               role: "system",
               content:
-                "Extrahiere aus der Nutzeranfrage streng JSON mit Feldern: keywords (array of strings), requireConsulting (bool), requireProdopt (bool). Keine Erklärungen, nur JSON. Verwende ausschließlich Begriffe aus der Anfrage (keine neuen Begriffe erfinden). Korrigiere nur Tippfehler und schreibe Synonyme für die Begriffe damit diese bei meiner Datenbank abfrage über Keyword Search auch gefunden werden.",
+                lang === "de"
+                  ? "Extrahiere aus der Nutzeranfrage streng JSON mit Feldern: keywords (array of strings), requireConsulting (bool), requireProdopt (bool). Keine Erklärungen, nur JSON. Verwende ausschließlich Begriffe aus der Anfrage (keine neuen Begriffe erfinden). Korrigiere nur Tippfehler und schreibe Synonyme (auch englisch/deutsch übergreifend), damit die Datenbanksuche robust ist."
+                  : "Extract strictly JSON from the user query with fields: keywords (array of strings), requireConsulting (bool), requireProdopt (bool). No explanations, JSON only. Use only terms from the input (no new concepts). Fix typos and add synonyms (cross German/English) so database keyword search is robust.",
             },
             {
               role: "user",
               content:
-                `Nutzeranfrage: "${interestText}". Liefere nur JSON. Beispiel: {"keywords":["supply chain","lean"],"requireConsulting":true,"requireProdopt":true}`,
+                lang === "de"
+                  ? `Nutzeranfrage: "${interestText}". Liefere nur JSON. Beispiel: {"keywords":["supply chain","lean"],"requireConsulting":true,"requireProdopt":true}`
+                  : `User query: "${interestText}". Return JSON only. Example: {"keywords":["supply chain","lean"],"requireConsulting":true,"requireProdopt":true}`,
             },
           ],
         });
@@ -313,7 +362,7 @@ export async function POST(req: NextRequest) {
       return ka.localeCompare(kb, "de", { numeric: true, sensitivity: "base" });
     });
 
-    console.info(`[generate-plan] Formatiere Ausstellerabschnitt (Anzahl=${sortedFinal.length}) …`);
+    console.info(`[generate-plan] Formatiere Ausstellerabschnitt (Anzahl=${sortedFinal.length}, lang=${lang}) …`);
     const exhibitorsOverviewContent = sortedFinal
       .map((m, idx) => `${idx + 1}. ${m.name} — ${formatLoc(m)}`)
       .join("\n");
@@ -326,17 +375,17 @@ export async function POST(req: NextRequest) {
       })
       .join("\n\n");
 
-    const prompts = buildPrompts({ ...data });
+    const prompts = buildPrompts({ ...data }, lang);
 
     // Nacheinander, um pro Frage gezielt zu generieren
     const sections: { title: string; content: string }[] = [];
     for (const p of prompts) {
-      console.info(`[generate-plan] Generiere Abschnitt: ${p.title} → ${SECTIONS_MODEL} …`);
+      console.info(`[generate-plan] Generiere Abschnitt: ${p.title} → ${SECTIONS_MODEL} (lang=${lang}) …`);
       console.time(`section_${p.title}`);
       const completion = await client.chat.completions.create({
         model: SECTIONS_MODEL,
         messages: [
-          { role: "system", content: "Du bist ein Messe- und Event-Planungsassistent. Antworte prägnant auf Deutsch." },
+          { role: "system", content: lang === "de" ? "Du bist ein Messe- und Event-Planungsassistent. Antworte prägnant auf Deutsch." : "You are a trade fair planning assistant. Answer concisely in English." },
           { role: "user", content: p.prompt },
         ],
       });
@@ -345,25 +394,35 @@ export async function POST(req: NextRequest) {
       sections.push({ title: p.title, content: text });
     }
 
-    // Events auswählen und als Block an Tagesplanung anhängen
+    // Events auswählen und als eigenen Abschnitt hinzufügen
     const selectedEvents = await selectEventsForUser(data.days, interestText, client);
     if (selectedEvents.length > 0) {
       const eventsBlock = selectedEvents
-        .sort((a, b) => `${a.date} ${a.time.start}`.localeCompare(`${b.date} ${b.time.start}`, "de"))
-        .map((e) => `• ${e.date} ${e.time.start}–${e.time.end}: ${e.title} (${e.location.hall || e.location.area || ""}${e.location.booth ? " " + e.location.booth : ""})`)
+        .sort((a, b) => `${a.date} ${a.time.start}`.localeCompare(`${b.date} ${b.time.start}`, lang === "de" ? "de" : "en"))
+        .map((e) => {
+          const m = e.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          let dateOut = e.date;
+          if (m) {
+            const [, y, mm, dd] = m;
+            dateOut = lang === "de" ? `${dd}.${mm}.${y}` : `September ${parseInt(dd, 10)}`;
+          }
+          const place = e.location.hall || e.location.area || "";
+          const loc = place + (e.location.booth ? ` ${e.location.booth}` : "");
+          return `• ${dateOut} ${e.time.start}–${e.time.end}: ${e.title} (${loc})`;
+        })
         .join("\n");
-      sections.push({ title: "Empfohlene Events", content: eventsBlock });
+      sections.push({ title: lang === "de" ? "Empfohlene Events" : "Recommended events", content: eventsBlock });
     }
 
-    // Übersicht direkt nach der Besuchsstrategie, Details ans Ende nach Tagesplanung
-    sections.splice(1, 0, { title: "Ausstellerübersicht", content: exhibitorsOverviewContent || "Keine passenden Aussteller gefunden." });
-    sections.push({ title: "Ausstellerdetails", content: exhibitorsSectionContent || "Keine passenden Aussteller gefunden." });
+    // Übersicht direkt nach der Besuchsstrategie, Details ans Ende
+    sections.splice(1, 0, { title: lang === "de" ? "Ausstellerübersicht" : "Exhibitor overview", content: exhibitorsOverviewContent || (lang === "de" ? "Keine passenden Aussteller gefunden." : "No matching exhibitors found.") });
+    sections.push({ title: lang === "de" ? "Ausstellerdetails" : "Exhibitor details", content: exhibitorsSectionContent || (lang === "de" ? "Keine passenden Aussteller gefunden." : "No matching exhibitors found.") });
 
     // PDF erzeugen (als Buffer)
     console.info("[generate-plan] Rendere PDF …");
     console.time("pdf_render");
     // Hallenpläne sammeln: eindeutige Liste anhand type + hallOrPlace
-    const hallPlanDir = "./Hallenplan";
+    const hallPlanDir = "/Users/bedranatug/TAS_IAA_Messe/Hallenplan";
     const uniqueHalls = Array.from(new Set(sortedFinal.map((m) => `${(m.location?.type||"").trim()}|${(m.location?.hallOrPlace || "").trim()}`).filter((s) => s.includes("|"))));
 
     // Feste Zuordnung der bekannten Hallenpläne → Datei
@@ -424,9 +483,10 @@ export async function POST(req: NextRequest) {
 
     const pdfBuffer = await renderPlanToBuffer({
       logoPath: `${process.cwd()}/public/tas_logo_2.png`,
-      answers: { ...(data as any), name: (data as any).name || "" } as any,
+      answers: { ...(data as any), name: (data as any).name || "", } as any,
       sections,
       hallPlans: hallImages,
+      lang,
     });
 
     // PDF-Hallenpläne ans Ende mergen (sofern vorhanden)
@@ -462,7 +522,7 @@ export async function POST(req: NextRequest) {
         const exhibitorsOverview = sortedFinal.map((m) => ({ id: m.id, name: m.name, location: `${(m.location?.type||"").trim()} ${(m.location?.hallOrPlace||"").trim()} ${(m.location?.booth||"").trim()}`.trim() }));
         const exhibitorsDetails = sortedFinal.map((m) => ({ id: m.id, name: m.name, location: `${(m.location?.type||"").trim()} ${(m.location?.hallOrPlace||"").trim()} ${(m.location?.booth||"").trim()}`.trim(), website: (m as any).website || null, profile: m.profile || null }));
         await supabase.from("messe_plans").insert({
-          lang: (req.headers.get("accept-language") || "de").split(",")[0]?.startsWith("de") ? "de" : "en",
+          lang,
           name: (data as any).name || null,
           email: data.email || null,
           role: data.role,
@@ -488,7 +548,7 @@ export async function POST(req: NextRequest) {
       console.warn("[generate-plan] Supabase insert fehlgeschlagen:", e);
     }
     console.timeEnd("pdf_render");
-    console.info("[generate-plan] DONE (PDF gesendet)");
+    console.info("[generate-plan] DONE");
     return new NextResponse(pdfBytes as unknown as BodyInit, { status: 200, headers: { "Content-Type": "application/pdf" } });
   } catch (e) {
     console.error("[generate-plan] ERROR:", e);

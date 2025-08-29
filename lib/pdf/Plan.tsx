@@ -43,7 +43,7 @@ const styles = StyleSheet.create({
   tdLast: { flex: 1, padding: 8, fontSize: 11, color: "#0b1f33" },
 });
 
-export function PlanPdf({ logoPath, answers, sections, hallPlans }: { logoPath: string; answers: Answers; sections: Section[]; hallPlans?: string[] }) {
+export function PlanPdf({ logoPath, answers, sections, hallPlans, lang = "de" }: { logoPath: string; answers: Answers; sections: Section[]; hallPlans?: string[]; lang?: "de" | "en" }) {
   return (
     <Document>
       <Page style={[styles.page, { backgroundColor: "#F9FAFB" }]} size="A4">
@@ -51,7 +51,7 @@ export function PlanPdf({ logoPath, answers, sections, hallPlans }: { logoPath: 
         <View style={styles.cover}>
           <PdfImage src={logoPath} style={{ width: 200 }} />
           <View style={styles.heroBar} />
-          <Text style={styles.title}>Ihr persönlicher Messeplan</Text>
+          <Text style={styles.title}>{lang === "de" ? "Ihr persönlicher Messeplan" : "Your personal trade fair plan"}</Text>
           {Boolean((answers as any).name) ? (
             <Text style={{ fontSize: 14, color: "#0b1f33" }}>{(answers as any).name}</Text>
           ) : null}
@@ -64,7 +64,7 @@ export function PlanPdf({ logoPath, answers, sections, hallPlans }: { logoPath: 
 
       <Page style={styles.page} size="A4">
         <View style={styles.topBar} />
-        <Text style={styles.h2}>Ihre Angaben</Text>
+        <Text style={styles.h2}>{lang === "de" ? "Ihre Angaben" : "Your details"}</Text>
         <View style={styles.chipRow}>
           {/* Rolle nicht mehr auf dem Cover, aber unter Angaben weiterhin sichtbar */}
           {answers.role ? <Text style={styles.chip}>{answers.role}</Text> : null}
@@ -80,11 +80,11 @@ export function PlanPdf({ logoPath, answers, sections, hallPlans }: { logoPath: 
         {sections.map((s, idx) => (
           <View key={`${s.title}-${idx}`} break={s.title === "Ausstellerübersicht"} wrap={true} style={styles.sectionCard}>
             <Text style={styles.h2}>{s.title}</Text>
-            {s.title === "Ausstellerdetails" ? (
+            {s.title === (lang === "de" ? "Ausstellerdetails" : "Exhibitor details") ? (
               <ExhibitorsBlock content={s.content} />
-            ) : s.title === "Ausstellerübersicht" ? (
+            ) : s.title === (lang === "de" ? "Ausstellerübersicht" : "Exhibitor overview") ? (
               <ExhibitorsTable content={s.content} />
-            ) : s.title === "Empfohlene Events" ? (
+            ) : s.title === (lang === "de" ? "Empfohlene Events" : "Recommended events") ? (
               <EventsTable content={s.content} />
             ) : (
               <MarkdownBlock content={s.content} />
@@ -96,7 +96,7 @@ export function PlanPdf({ logoPath, answers, sections, hallPlans }: { logoPath: 
       {(hallPlans || []).map((src, idx) => (
         <Page key={`hall-${idx}`} wrap style={styles.page} size="A4">
           <View style={styles.topBar} />
-          <Text style={styles.h2}>Hallenplan</Text>
+          <Text style={styles.h2}>{lang === "de" ? "Hallenplan" : "Hall plan"}</Text>
           <PdfImage src={src} style={{ marginTop: 8, width: 520 }} />
         </Page>
       ))}
