@@ -21,10 +21,12 @@ COPY . .
 RUN npm run build
 
 # ---- production runner ----
+# ---- production runner ----
 FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV HOSTNAME=0.0.0.0
+ENV NEXT_CACHE_DIR=/tmp/next-cache
 
 RUN addgroup -g 1001 nodejs && adduser -u 1001 -G nodejs -D nextjs
 
@@ -32,17 +34,9 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# entrypoint to ensure perms at *runtime*
-COPY <<'SH' /entrypoint.sh
-#!/bin/sh
-set -e
-mkdir -p /app/.next/cache
-chown -R nextjs:nodejs /app/.next || true
-exec "$@"
-SH
-RUN chmod +x /entrypoint.sh
+RUN mkdir -p /tmp/next-cache && chown -R nextjs:nodejs /tmp/next-cache
 
 EXPOSE 3000
 USER nextjs
-ENTRYPOINT ["/entrypoint.sh"]
 CMD ["node", "server.js"]
+
