@@ -106,8 +106,8 @@ export default function Home() {
 
 
     addHidden('to_email', data.email);
-    addHidden('subject', 'Ihr persönlicher Messeplan');
-    addHidden('message', 'Vielen Dank! Wir haben Ihre Angaben erhalten. Ihr persönlicher Messeplan wird jetzt erstellt.');
+    addHidden('subject', 'Ihr persönlicher Messeplan für die IAA MOBILITY 2025');
+    addHidden('message', 'Vielen Dank für Ihre Angaben im Messeformular. Auf dieser Basis habe ich für Sie einen individuellen Messeplan erstellt – mit Strategieempfehlungen, relevanten Ausstellern samt Standorten sowie passenden Events nach Tagen und Themen. Ziel ist es, Ihren Besuch auf der IAA MOBILITY so effizient und wirkungsvoll wie möglich zu gestalten.  Den persönlichen Messebericht finden Sie im Anhang.');
 
     const file = new File([pdfBytes], 'Messeplan.pdf', { type: 'application/pdf' });
     const fileInput = document.createElement('input');
@@ -196,13 +196,13 @@ export default function Home() {
         profileHeading: "Ihr Profil und Messeziele",
         q1: "1. Welche Rolle beschreibt Sie am besten?",
         q2: "2. Was möchten Sie mit Ihrem Messebesuch erreichen?",
-        q3: "3. Bitte geben Sie mir Input zu den Ausstellern die Sie interessieren.",
+        q3: "3. Welche Aussteller, Marken oder Themen sollen auf Ihren Messeplan?",
         q4: "4. An welchen Tagen sind Sie auf der Messe?",
         q5: "5. Optional: Marken oder Stände, die Sie auf jeden Fall sehen möchten?",
         submit: "Absenden",
         back: "Zurück",
-        downloadTitle: "Ihr persönlicher Messeplan ist fertig – jetzt als PDF herunterladen",
-        downloadBtn: "PDF herunterladen",
+        downloadTitle: "Ihr persönlicher Messeplan ist fertig – jetzt per Mail senden",
+        downloadBtn: "PDF erstellen",
         creating: "Erstelle PDF ...",
         consent: "Mit Absenden stimmen Sie der Verarbeitung gemäß Datenschutzhinweisen zu.",
         searchPh: "Suche nach Ausstellern",
@@ -214,13 +214,13 @@ export default function Home() {
         profileHeading: "Your profile and goals",
         q1: "1. Which role describes you best?",
         q2: "2. What is your goal for the visit?",
-        q3: "3. Please provide input about the exhibitors you are interested in.",
+        q3: "3. Which exhibitors, brands or topics should be on your trade fair plan?",
         q4: "4. On which days will you attend?",
         q5: "5. Optional: Any brands/booths you must see?",
         submit: "Submit",
         back: "Back",
-        downloadTitle: "Your plan is ready – download the PDF now",
-        downloadBtn: "Download PDF",
+        downloadTitle: "Your plan is ready – send the PDF now",
+        downloadBtn: "Generate PDF",
         creating: "Generating PDF ...",
         consent: "By submitting you agree to our privacy policy.",
         searchPh: "Search exhibitors",
@@ -298,7 +298,7 @@ export default function Home() {
               <textarea
                 className="w-full rounded-md border p-3"
                 rows={4}
-                placeholder={lang === "de" ? "Freitext: Themen, Technologien, Branchen, Aussteller ..." : "Free text: topics, technologies, industries, exhibitors ..."}
+                placeholder={lang === "de" ? "Freitext: Schreiben Sie frei – je konkreter, desto besser. Nennen Sie Marken, Technologien, Produktbereiche oder Anwendungsfälle (gern auch als kurzer Absatz). " : "Free text: Write freely – the more specific, the better. Mention brands, technologies, product areas or use cases (a short paragraph is fine too)."}
                 value={data.exhibitorsText}
                 onChange={(e) => setData((d) => ({ ...d, exhibitorsText: e.target.value }))}
               />

@@ -84,6 +84,8 @@ export function PlanPdf({ logoPath, answers, sections, hallPlans }: { logoPath: 
               <ExhibitorsBlock content={s.content} />
             ) : s.title === "Ausstellerübersicht" ? (
               <ExhibitorsTable content={s.content} />
+            ) : s.title === "Empfohlene Events" ? (
+              <EventsTable content={s.content} />
             ) : (
               <MarkdownBlock content={s.content} />
             )}
@@ -238,6 +240,51 @@ function ExhibitorsTable({ content }: { content: string }) {
       {rows.map((r, idx) => (
         <View key={idx} style={styles.tr}>
           <Text style={styles.td}>{r.name}</Text>
+          <Text style={styles.tdLast}>{r.loc}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+
+function EventsTable({ content }: { content: string }) {
+  // Erwartetes Format je Zeile (Bullet): "• YYYY-MM-DD HH:MM–HH:MM: Titel (Ort)"
+  const toDeDate = (iso: string) => {
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return iso;
+    const [_, y, mm, dd] = m;
+    return `${dd}.${mm}.${y}`;
+  };
+
+  const rows = content
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((l) => {
+      // • 2024-09-09 10:00–11:00: Titel (Ort)
+      const m = l.match(/^\s*[•\-]\s+(\d{4}-\d{2}-\d{2})\s+([0-9]{1,2}:[0-9]{2})\s*[–-]\s*([0-9]{1,2}:[0-9]{2}):\s+(.*?)(?:\s*\((.*?)\))?\s*$/);
+      if (!m) return null;
+      const date = toDeDate(m[1]);
+      const start = m[2];
+      const end = m[3];
+      const title = m[4];
+      const loc = (m[5] || "").trim();
+      return { when: `${date} ${start}–${end}`, title, loc };
+    })
+    .filter((x): x is { when: string; title: string; loc: string } => Boolean(x));
+
+  return (
+    <View style={styles.table}>
+      <View style={styles.tableHeader}>
+        <Text style={styles.th}>Datum & Zeit</Text>
+        <Text style={styles.th}>Titel</Text>
+        <Text style={[styles.th, { borderRightWidth: 0 }]}>Ort</Text>
+      </View>
+      {rows.map((r, idx) => (
+        <View key={idx} style={styles.tr}>
+          <Text style={styles.td}>{r.when}</Text>
+          <Text style={styles.td}>{r.title}</Text>
           <Text style={styles.tdLast}>{r.loc}</Text>
         </View>
       ))}
