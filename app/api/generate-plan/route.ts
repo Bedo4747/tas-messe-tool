@@ -77,10 +77,6 @@ Regeln (anwenden, nicht ausgeben):
     •    Jede Zeile trimmen, max. 12 Wörter, keine Endpunkte`,
     },
     // Ausstellerempfehlungen generieren wir unten direkt aus der Datenbank
-    {
-      title: "Tagesplanung",
-      prompt: `Tage: ${input.days.join(", ")}. Erstelle einen kompakten Tagesplan mit Zeitblöcken (Vormittag/Nachmittag) und Aktivitäten. Berücksichtige Pflichtstände: ${input.mustSee.join(", ") || "keine"}.`,
-    },
   ];
 }
 
@@ -345,7 +341,7 @@ export async function POST(req: NextRequest) {
       sections.push({ title: p.title, content: text });
     }
 
-    // Events auswählen und als Block an Tagesplanung anhängen
+    // Events auswählen und als eigenen Abschnitt hinzufügen
     const selectedEvents = await selectEventsForUser(data.days, interestText, client);
     if (selectedEvents.length > 0) {
       const eventsBlock = selectedEvents
@@ -355,7 +351,7 @@ export async function POST(req: NextRequest) {
       sections.push({ title: "Empfohlene Events", content: eventsBlock });
     }
 
-    // Übersicht direkt nach der Besuchsstrategie, Details ans Ende nach Tagesplanung
+    // Übersicht direkt nach der Besuchsstrategie, Details ans Ende
     sections.splice(1, 0, { title: "Ausstellerübersicht", content: exhibitorsOverviewContent || "Keine passenden Aussteller gefunden." });
     sections.push({ title: "Ausstellerdetails", content: exhibitorsSectionContent || "Keine passenden Aussteller gefunden." });
 
@@ -366,60 +362,63 @@ export async function POST(req: NextRequest) {
     const hallPlanDir = "/Users/bedranatug/TAS_IAA_Messe/Hallenplan";
     const uniqueHalls = Array.from(new Set(sortedFinal.map((m) => `${(m.location?.type||"").trim()}|${(m.location?.hallOrPlace || "").trim()}`).filter((s) => s.includes("|"))));
 
-    // Feste Zuordnung der bekannten Hallenpläne → Datei
-    const MAP: Record<string, { pdf?: string; img?: string }> = {
-      // Summit
-      "Summit|Atrium": { pdf: `${hallPlanDir}/Summit_Atrium.pdf` },
-      "Summit|Halle A1": { pdf: `${hallPlanDir}/Summit_HalleA1.pdf` },
-      "Summit|Halle A2": { pdf: `${hallPlanDir}/Summit_HalleA2.pdf` },
-      "Summit|Halle A3": { pdf: `${hallPlanDir}/Summit_HalleA3.pdf` },
-      "Summit|Halle B1": { pdf: `${hallPlanDir}/Summit_HalleB1.pdf` },
-      "Summit|Halle B2": { pdf: `${hallPlanDir}/Summit_HalleB2.pdf` },
-      "Summit|Halle B3": { pdf: `${hallPlanDir}/Summit_HalleB3.pdf` },
-      // Open Space (verschiedene Plätze)
-      "Open Space|Königsplatz": { pdf: `${hallPlanDir}/Openspace_Koenigsplatz.pdf` },
-      "Open Space|Koenigsplatz": { pdf: `${hallPlanDir}/Openspace_Koenigsplatz.pdf` },
-      "Open Space|Ludwigstraße": { pdf: `${hallPlanDir}/Openspace_Ludwigstrasse.pdf` },
-      "Open Space|Ludwigstrasse": { pdf: `${hallPlanDir}/Openspace_Ludwigstrasse.pdf` },
-      "Open Space|Marienplatz": { pdf: `${hallPlanDir}/Openspace_Marienplatz.pdf` },
-      "Open Space|Max-Joseph-Platz": { pdf: `${hallPlanDir}/Openspace_Max-Joseph-Platz.pdf` },
-      "Open Space|Odeonsplatz": { pdf: `${hallPlanDir}/Openspace_Odeonsplatz.pdf` },
-      "Open Space|Residenzhöfe": { pdf: `${hallPlanDir}/Openspace_Residenzhoefe.pdf` },
-      "Open Space|Residenzhoefe": { pdf: `${hallPlanDir}/Openspace_Residenzhoefe.pdf` },
-      "Open Space|Wittelsbacherplatz": { pdf: `${hallPlanDir}/Openspace_Wittelsbacherplatz.pdf` },
-    };
+    // Dynamische Zuordnung basierend auf Dateinamen im Ordner
+    function normHallKey(s: string): string {
+      return (s || "")
+        .toLowerCase()
+        .replace(/ä/g, "ae")
+        .replace(/ö/g, "oe")
+        .replace(/ü/g, "ue")
+        .replace(/ß/g, "ss")
+        .replace(/\s+/g, "")
+        .replace(/[_-]+/g, "");
+    }
 
-    const hallImagesOS: string[] = [];
-    const hallImagesSummit: string[] = [];
+    const allFiles = fs.existsSync(hallPlanDir) ? fs.readdirSync(hallPlanDir) : [];
+    const summitIndex: Record<string, string> = {};
+    const osIndex: Record<string, string> = {};
+    for (const f of allFiles) {
+      const m = f.match(/^(Summit|Openspace)_(.+)\.(pdf|png|jpg|jpeg)$/i);
+      if (m) {
+        const type = m[1];
+        const place = m[2];
+        const key = normHallKey(place);
+        const full = `${hallPlanDir}/${f}`;
+        if (/^summit$/i.test(type)) summitIndex[key] = full; else osIndex[key] = full;
+      }
+    }
+
+    console.info(`[generate-plan] Hallen erkannt: ${uniqueHalls.join(", ")}`);
     const hallPdfsOS: string[] = [];
     const hallPdfsSummit: string[] = [];
-    uniqueHalls.forEach((pair) => {
-      const entry = MAP[pair];
-      if (!entry) return;
-      const isOS = pair.startsWith("Open Space|");
-      const isSummit = pair.startsWith("Summit|");
-      if (entry.img && fs.existsSync(entry.img)) {
-        if (isOS) hallImagesOS.push(entry.img); else if (isSummit) hallImagesSummit.push(entry.img);
-      }
-      if (entry.pdf && fs.existsSync(entry.pdf)) {
-        if (isOS) hallPdfsOS.push(entry.pdf); else if (isSummit) hallPdfsSummit.push(entry.pdf);
-      }
-    });
+    const hasOpenSpace = uniqueHalls.some((p) => /^open\s*space\|/i.test(p));
+    const hasSummit = uniqueHalls.some((p) => /^summit\|/i.test(p));
 
-    // Übersichtsbilder zuerst je Typ
+    for (const pair of uniqueHalls) {
+      const [t, h] = pair.split("|");
+      if (!t || !h) continue;
+      const key = normHallKey(h);
+      if (/^open\s*space$/i.test(t)) {
+        const p = osIndex[key];
+        if (p && fs.existsSync(p) && /\.pdf$/i.test(p)) hallPdfsOS.push(p);
+      } else if (/^summit$/i.test(t)) {
+        const p = summitIndex[key];
+        if (p && fs.existsSync(p) && /\.pdf$/i.test(p)) hallPdfsSummit.push(p);
+      }
+    }
+
+    // Übersichtsbilder zuerst je Typ (sofern es überhaupt Aussteller dieses Typs gibt)
     const hallImages: string[] = [];
-    if (hallPdfsOS.length || hallImagesOS.length) {
+    if (hasOpenSpace) {
       const osOverview = `${hallPlanDir}/Openspace.png`;
       if (fs.existsSync(osOverview)) hallImages.push(osOverview);
-      hallImages.push(...hallImagesOS);
     }
-    if (hallPdfsSummit.length || hallImagesSummit.length) {
+    if (hasSummit) {
       const summitOverview = `${hallPlanDir}/Summit.png`;
       if (fs.existsSync(summitOverview)) hallImages.push(summitOverview);
-      hallImages.push(...hallImagesSummit);
     }
 
-    // PDFs danach in der gleichen Gruppenreihenfolge
+    // PDFs in der Reihenfolge Open Space → Summit anhängen
     const hallPdfs: string[] = [...hallPdfsOS, ...hallPdfsSummit];
 
     const pdfBuffer = await renderPlanToBuffer({
