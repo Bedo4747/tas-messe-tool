@@ -1,12 +1,70 @@
 import { NextRequest, NextResponse } from "next/server";
+import fs from "fs";
+import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 // Mailversand temporär entfernt – PDF wird direkt zurückgegeben
 import { renderPlanToBuffer } from "@/lib/pdf/renderPlan";
 import OpenAI from "openai";
+import { EXHIBITORS_DB, Exhibitor } from "@/lib/data/exhibitors_db";
+import { selectEventsForUser } from "@/lib/server/events";
+import nodemailer from "nodemailer";
+
+// --- Microsoft Graph helper (App-Registrierung ohne zusätzlichen Dienst) ---
+async function getMsGraphToken() {
+  const tenant = process.env.MS_TENANT_ID;
+  const clientId = process.env.MS_CLIENT_ID;
+  const clientSecret = process.env.MS_CLIENT_SECRET;
+  if (!tenant || !clientId || !clientSecret) return null;
+  const form = new URLSearchParams();
+  form.set("client_id", clientId);
+  form.set("client_secret", clientSecret);
+  form.set("grant_type", "client_credentials");
+  form.set("scope", "https://graph.microsoft.com/.default");
+  const resp = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: form.toString(),
+  });
+  if (!resp.ok) return null;
+  const json = await resp.json();
+  return (json as any).access_token as string | undefined;
+}
+
+async function sendViaMsGraph(recipient: string, pdfBytes: Uint8Array) {
+  const accessToken = await getMsGraphToken();
+  const sender = process.env.MS_SENDER_UPN; // z. B. postfach@domain.tld
+  if (!accessToken || !sender) return false;
+  const base64Pdf = Buffer.from(pdfBytes).toString("base64");
+  const saveToSent = (process.env.MS_SAVE_TO_SENT || "1") !== "0";
+  const body = {
+    message: {
+      subject: "Ihr persönlicher Messeplan",
+      body: { contentType: "Text", content: "Anbei Ihr persönlicher Messeplan als PDF." },
+      toRecipients: [{ emailAddress: { address: recipient } }],
+      attachments: [
+        {
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: "messeplan.pdf",
+          contentType: "application/pdf",
+          contentBytes: base64Pdf,
+        },
+      ],
+    },
+    saveToSentItems: saveToSent,
+  } as const;
+  const resp = await fetch(`https://graph.microsoft.com/v1.0/users/${encodeURIComponent(sender)}/sendMail`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return resp.ok;
+}
 
 const schema = z.object({
   email: z.string().email().optional(),
   data: z.object({
+    name: z.string().optional().default(""),
+    email: z.string().optional().default(""),
     role: z.string().nullable(),
     goal: z.string().nullable(),
     exhibitorsText: z.string().optional().default(""),
@@ -21,12 +79,52 @@ function buildPrompts(input: z.infer<typeof schema>["data"]): PromptItem[] {
   return [
     {
       title: "Besuchsstrategie",
-      prompt: `Nutzerrolle: ${input.role ?? "Unbekannt"}. Messeziel: ${input.goal ?? "Unbekannt"}. Tage: ${input.days.join(", ")}. Erstelle eine prägnante Besuchsstrategie (max. 6 Bulletpoints).`,
+      prompt: `Aufgabe:
+Erzeuge aus Rolle und Messeziel einen ultra-kompakten Action Plan auf Deutsch. Nutze ausschließlich diese Eingaben. Bullets im Objekt-Verb-Stil (Objekt zuerst, Verb am Ende), max. 12 Wörter, kein Punkt am Ende. Verwende das Bullet-Zeichen „• “. Gib nur das unten definierte Format aus, ohne Zusatztexte oder Platzhalter. Sortiere Bullets nach Impact. Vermeide Doppelungen.
+Eingaben:
+    •    Rolle: ${input.role ?? "Unbekannt"}
+    •    Ziel: ${input.goal ?? "Unbekannt"}
+Ausgabeformat (streng, exakt einhalten):
+Titel: Action Plan – ${input.role ?? "Unbekannt"} | Ziel: ${input.goal ?? "Unbekannt"}
+Action Plan:
+Vor:
+• <max. 3 Kernbullets>
+• <…>
+• <…>
+Während:
+• <max. 5 Kernbullets>
+• <…>
+• <…>
+• <…>
+• <…>
+Nach:
+• <max. 3 Kernbullets>
+• <…>
+• <…>
+KPIs – Top 3:
+• <KPI 1, messbar und realistisch>
+• <KPI 2, messbar und realistisch>
+• <KPI 3, messbar und realistisch>
+Regeln (anwenden, nicht ausgeben):
+    •    Jede Zeile mit Verb am Ende (z. B. „RFQ-Fragenkatalog vorbereiten“)
+    •    Zahlen/Fristen nutzen (Top-3, 48 Stunden, 14 Tage)
+    •    Realistische KPIs je Messetag wählen (nicht kumuliert), an Rolle/Ziel anpassen
+    ◦    C-Level: 1–3 High-Impact KPIs (z. B. Exklusivtermine, Pilotentscheidung)
+    ◦    Bereichsleitung / PM / Spezialist: 3–5 umsetzbare KPIs (Demos, PoCs, Schnittstellen)
+    ◦    Standortleitung: 2–4 KPIs zu Betriebssicherheit/SLAs
+    ◦    Studierende / Young Professional: 3–5 KPIs (HR-Gespräche, Follow-ups, Bewerbungen)
+    ◦    Presse / Medien: 2–4 KPIs (Interviewslots, O-Töne, Veröffentlichungen)
+    •    Ziel-spezifische KPI-Orientierung (Beispiele, nicht ausgeben):
+◦    Produkte vergleichen: 3 Demos testen, 1 Vergleichsmatrix finalisieren, 2 Referenzen sprechen
+    ◦    Partner & Lieferanten finden: 2 qualifizierte Lieferantengespräche, 1 RFQ starten, 1 Pilottermin fixieren
+    ◦    Tech-Insights & Demos erleben: 4 Demos testen, 1 PoC-Hypothese definieren, 2 Roadmap-Zugeständnisse sichern
+    ◦    Karriere & Jobs: 5 HR-Gespräche führen, 3 Follow-ups senden, 2 Bewerbungen einreichen
+    ◦    Medienarbeit: 2 Interviewslots sichern, 1 Exklusivzitat erhalten, 1 Veröffentlichung planen
+    ◦    Inspiration & Überblick: 5 Highlights dokumentieren, 3 Trends priorisieren, 1 Entscheidungsempfehlung formulieren
+    •    Keine Marken, keine Füllwörter, keine Wiederholungen, nur Wichtigstes
+    •    Jede Zeile trimmen, max. 12 Wörter, keine Endpunkte`,
     },
-    {
-      title: "Ausstellerempfehlungen",
-      prompt: `Freitext-Interessen: ${input.exhibitorsText}. Pflichtstände: ${input.mustSee.join(", ") || "keine"}. Empfiehl 8 relevante Aussteller mit kurzer Begründung (eine Zeile je Aussteller).`,
-    },
+    // Ausstellerempfehlungen generieren wir unten direkt aus der Datenbank
     {
       title: "Tagesplanung",
       prompt: `Tage: ${input.days.join(", ")}. Erstelle einen kompakten Tagesplan mit Zeitblöcken (Vormittag/Nachmittag) und Aktivitäten. Berücksichtige Pflichtstände: ${input.mustSee.join(", ") || "keine"}.`,
@@ -36,6 +134,7 @@ function buildPrompts(input: z.infer<typeof schema>["data"]): PromptItem[] {
 
 export async function POST(req: NextRequest) {
   try {
+    console.info("[generate-plan] START");
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) {
       return NextResponse.json({ error: "Ungültige Eingaben" }, { status: 400 });
@@ -48,42 +147,433 @@ export async function POST(req: NextRequest) {
     }
 
     const client = new OpenAI({ apiKey: openaiApiKey });
-    const prompts = buildPrompts(data);
+    const supabaseUrl = process.env.SUPABASE_URL || "";
+    const supabaseAnon = process.env.SUPABASE_ANON_KEY || "";
+    const supabase = supabaseUrl && supabaseAnon ? createClient(supabaseUrl, supabaseAnon) : null;
+    const EXTRACTOR_MODEL = process.env.EXTRACTOR_MODEL || (process.env.USE_GPT5_NANO === "1" ? "gpt-5-nano" : "gpt-4o-mini");
+    const SECTIONS_MODEL = process.env.SECTIONS_MODEL || (process.env.USE_GPT5_NANO === "1" ? "gpt-5-nano" : "gpt-4o-mini");
+    const VALIDATION_MODEL = process.env.VALIDATION_MODEL || "gpt-5";
+    // Aussteller-Matching basierend auf Frage 3 (Freitext) + Must-see
+    const interestText = `${data.exhibitorsText || ""} ${data.mustSee.join(" ")}`.trim();
+    const gatesEnabled = (process.env.INTENT_GATES ?? "on").toLowerCase() !== "off";
+    // Heuristik: Wenn Benutzer Beratung/Optimierung erwähnt → harte Anforderungen setzen
+    const requireConsulting = /berat|consult/i.test(interestText);
+    const requireProdopt = /prozess|process|lean|shopfloor|oee|effiz|produktion|manufactur|operation/i.test(interestText);
+    // GPT-gestützte Keyword-Extraktion (zuerst, ohne zusätzliche Begriffe)
+    let augmentedQuery = interestText;
+    let extractedFlags = gatesEnabled ? { requireConsulting, requireProdopt } : { requireConsulting: false, requireProdopt: false };
+    let structPhrases: string[] = [];
+    let structDomains: string[] | undefined = undefined;
+    let structCompany: string | undefined = undefined;
+    try {
+      if (openaiApiKey && interestText) {
+        console.info(`[generate-plan] Extractor → ${EXTRACTOR_MODEL} (Keywords/Phrasen) …`);
+        console.time("extractor_gpt5");
+        const extractor = await client.chat.completions.create({
+          model: EXTRACTOR_MODEL,
+          messages: [
+            {
+              role: "system",
+              content:
+                "Extrahiere aus der Nutzeranfrage streng JSON mit Feldern: keywords (array of strings), requireConsulting (bool), requireProdopt (bool). Keine Erklärungen, nur JSON. Verwende ausschließlich Begriffe aus der Anfrage (keine neuen Begriffe erfinden). Korrigiere nur Tippfehler und schreibe Synonyme für die Begriffe damit diese bei meiner Datenbank abfrage über Keyword Search auch gefunden werden.",
+            },
+            {
+              role: "user",
+              content:
+                `Nutzeranfrage: "${interestText}". Liefere nur JSON. Beispiel: {"keywords":["supply chain","lean"],"requireConsulting":true,"requireProdopt":true}`,
+            },
+          ],
+        });
+        const raw = extractor.choices[0]?.message?.content ?? "{}";
+        const jsonStart = raw.indexOf("{");
+        const jsonEnd = raw.lastIndexOf("}");
+        const jsonSafe = jsonStart >= 0 && jsonEnd >= 0 ? raw.slice(jsonStart, jsonEnd + 1) : "{}";
+        const parsed = JSON.parse(jsonSafe) as {
+          keywords?: unknown;
+          synonyms?: unknown;
+          phrases?: unknown;
+          companyType?: unknown;
+          domains?: unknown;
+          requireConsulting?: unknown;
+          requireProdopt?: unknown;
+        };
+        const kw = Array.isArray(parsed.keywords)
+          ? (parsed.keywords as unknown[]).filter((x): x is string => typeof x === "string")
+          : [];
+        const syn = Array.isArray(parsed.synonyms)
+          ? (parsed.synonyms as unknown[]).filter((x): x is string => typeof x === "string")
+          : [];
+        const phrases = Array.isArray(parsed.phrases)
+          ? (parsed.phrases as unknown[]).filter((x): x is string => typeof x === "string")
+          : [];
+        const companyType = typeof parsed.companyType === "string" ? parsed.companyType : undefined;
+        const domains = Array.isArray(parsed.domains)
+          ? (parsed.domains as unknown[]).filter((x): x is string => typeof x === "string")
+          : undefined;
+        const rc = typeof parsed.requireConsulting === "boolean" ? (parsed.requireConsulting as boolean) : false;
+        const rp = typeof parsed.requireProdopt === "boolean" ? (parsed.requireProdopt as boolean) : false;
+        augmentedQuery = [...kw, ...syn].join(" ") || interestText;
+        extractedFlags = gatesEnabled
+          ? { requireConsulting: (requireConsulting || rc), requireProdopt: (requireProdopt || rp) }
+          : { requireConsulting: false, requireProdopt: false };
+        // Phrasen in den StructuredQuery übernehmen
+        structPhrases = phrases;
+        structDomains = domains;
+        structCompany = companyType;
+        console.timeEnd("extractor_gpt5");
+        console.info(`[generate-plan] Extractor Ergebnis: keywords=${kw.length+syn.length}, phrases=${phrases.length}, domains=${domains?.length||0}, companyType=${companyType||"-"}`);
+      }
+    } catch (e) {
+      console.warn("[generate-plan] Extractor Fehler, fahre mit Heuristik fort:", e);
+      // still use heuristic-only query
+    }
+
+    // 1) Vollständige DB in Chunks an gpt-5 validieren (parallel), je Chunk max. 150
+    const CHUNK_SIZE = Math.max(50, parseInt(process.env.CHUNK_SIZE || "150", 10) || 150);
+    const DEFAULT_TOP_N = Math.max(5, parseInt(process.env.DEFAULT_TOP_N || "12", 10) || 12);
+    console.info(`[generate-plan] Parallel-Validierung → ${VALIDATION_MODEL}, Chunkgröße=${CHUNK_SIZE} …`);
+    const allPayload = EXHIBITORS_DB.map((m) => ({
+      id: m.id,
+      name: m.name,
+      profile: m.profile || "",
+      keywords: m.keywords || [],
+      themes: m.themes || [],
+      location: `${(m.location?.type||"").trim()} ${(m.location?.hallOrPlace||"").trim()} ${(m.location?.booth||"").trim()}`.trim(),
+    }));
+    const chunks: typeof allPayload[] = [];
+    for (let i = 0; i < allPayload.length; i += CHUNK_SIZE) chunks.push(allPayload.slice(i, i + CHUNK_SIZE));
+    console.info(`[generate-plan] Anzahl Chunks: ${chunks.length}`);
+
+    async function validateChunk(idx: number, payload: typeof allPayload[0][]): Promise<string[]> {
+      console.info(`[generate-plan] Chunk ${idx+1}/${chunks.length} → ${VALIDATION_MODEL} (Entities=${payload.length}) …`);
+      const comp = await client.chat.completions.create({
+        model: VALIDATION_MODEL,
+        messages: [
+          { role: "system", content: "Wähle aus dieser Ausstellerliste nur diejenigen, die STRIKT zur Nutzeranfrage passen. Antworte NUR JSON: {\"selected_ids\":[id,...]}. Wenn keiner passt, gib {\"selected_ids\":[]} zurück." },
+          { role: "user", content: `Nutzeranfrage (Frage 3): ${interestText || augmentedQuery}\nPhrasen: ${JSON.stringify(structPhrases || [])}\nAussteller: ${JSON.stringify(payload)}` },
+        ],
+      });
+      const raw = comp.choices[0]?.message?.content || "{}";
+      const s = raw.indexOf("{"); const e = raw.lastIndexOf("}");
+      const json = s>=0 && e>=0 ? raw.slice(s,e+1) : "{}";
+      try {
+        const parsed = JSON.parse(json) as { selected_ids?: unknown };
+        const ids = Array.isArray(parsed.selected_ids) ? (parsed.selected_ids as unknown[]).filter((x): x is string => typeof x === "string") : [];
+        console.info(`[generate-plan] Chunk ${idx+1} Auswahl: ${ids.length}`);
+        return ids;
+      } catch {
+        console.warn(`[generate-plan] Chunk ${idx+1} JSON-Parse fehlgeschlagen`);
+        return [];
+      }
+    }
+
+    const chunkResults = await Promise.all(chunks.map((c, i) => validateChunk(i, c)));
+    const selectedIdsSet = new Set<string>(chunkResults.flat());
+
+    // 2) Finaler Merge-Prompt: beste N auswählen
+    let finalMatched: Exhibitor[] = [];
+    if (selectedIdsSet.size > 0) {
+      const selectedPayload = allPayload.filter((p) => selectedIdsSet.has(p.id));
+      console.info(`[generate-plan] Finaler Merge-Prompt → ${VALIDATION_MODEL} (Kandidaten=${selectedPayload.length}) …`);
+      const final = await client.chat.completions.create({
+        model: VALIDATION_MODEL,
+        messages: [
+          { role: "system", content: "Ranke die passendsten Aussteller zur Anfrage. Antworte NUR JSON: {\"ranked_ids\":[id,...]}." },
+          { role: "user", content: `Nutzeranfrage (Frage 3): ${interestText || augmentedQuery}\nKandidaten: ${JSON.stringify(selectedPayload)}\nErwünschte Anzahl: ${DEFAULT_TOP_N}` },
+        ],
+      });
+      const raw = final.choices[0]?.message?.content || "{}";
+      const s = raw.indexOf("{"); const e = raw.lastIndexOf("}");
+      const json = s>=0 && e>=0 ? raw.slice(s,e+1) : "{}";
+      try {
+        const parsed = JSON.parse(json) as { ranked_ids?: unknown };
+        const ids = Array.isArray(parsed.ranked_ids) ? (parsed.ranked_ids as unknown[]).filter((x): x is string => typeof x === "string") : [];
+        const chosenList = (ids.length ? ids : Array.from(selectedIdsSet)).slice(0, DEFAULT_TOP_N);
+        finalMatched = chosenList.map((id) => EXHIBITORS_DB.find((e) => e.id === id)).filter((x): x is Exhibitor => Boolean(x));
+      } catch {
+        const chosenList = Array.from(selectedIdsSet).slice(0, DEFAULT_TOP_N);
+        finalMatched = chosenList.map((id) => EXHIBITORS_DB.find((e) => e.id === id)).filter((x): x is Exhibitor => Boolean(x));
+      }
+    } else {
+      console.info("[generate-plan] Keine passenden Aussteller in den Chunks gefunden.");
+      finalMatched = [];
+    }
+
+    // Must-See aus Frage 5 zwingend aufnehmen
+    try {
+      const mustList = (data.mustSee || []).map((s) => s.trim()).filter(Boolean);
+      const normalize = (t: string) => t
+        .toLowerCase()
+        .normalize("NFKD").replace(/[\p{Diacritic}]/gu, "")
+        .replace(/[^a-z0-9]+/g, " ")
+        .replace(/\b(gmbh|ag|kg|inc|llc|ltd|srl|spa|sa)\b/g, " ")
+        .trim();
+      const mustNorm = mustList.map(normalize);
+      if (mustNorm.length > 0) {
+        const requiredSet = new Map<string, typeof EXHIBITORS_DB[number]>();
+        for (const ex of EXHIBITORS_DB) {
+          const nameN = normalize(ex.name || "");
+          const kwN = normalize((ex.keywords || []).join(" "));
+          const themesN = normalize((ex.themes || []).join(" "));
+          for (const q of mustNorm) {
+            if (!q) continue;
+            const direct = nameN === q || nameN.includes(q) || q.includes(nameN);
+            const kwHit = kwN.includes(q) || themesN.includes(q);
+            if (direct || kwHit) {
+              requiredSet.set(ex.id, ex);
+              break;
+            }
+          }
+        }
+        if (requiredSet.size > 0) {
+          const byId = new Map<string, typeof EXHIBITORS_DB[number]>();
+          // erst Pflicht, dann restliche (Reihenfolge bleibt später nach Halle sortiert)
+          Array.from(requiredSet.values()).forEach((r) => byId.set(r.id, r));
+          finalMatched.forEach((f) => byId.set(f.id, f));
+          finalMatched = Array.from(byId.values());
+          console.info(`[generate-plan] Must-See hinzugefügt: ${requiredSet.size} verpflichtend`);
+        } else {
+          console.info("[generate-plan] Keine Must-See-Matches gefunden (Namensabweichung?)");
+        }
+      }
+    } catch {}
+
+    // Empfehlungen-Abschnitt direkt aus DB aufbauen (keine GPT-Halluzinationen)
+    const formatLoc = (m: { location: { type: string; hallOrPlace: string; booth: string } }) => {
+      const { type, hallOrPlace, booth } = m.location;
+      // Nur aus DB-Feldern zusammensetzen, keine zusätzlichen Wörter wie "Halle" einfügen
+      const t = (type || "").trim();
+      const hall = (hallOrPlace || "").trim();
+      const bt = (booth || "").trim();
+      const parts: string[] = [];
+      if (t) parts.push(t);
+      if (hall) parts.push(hall);
+      if (bt) parts.push(bt);
+      return parts.join(" ").trim();
+    };
+
+    // Nach Halle/Ort sortieren, damit der Rundgang effizient ist
+    const sortedFinal = [...finalMatched].sort((a, b) => {
+      const la = a.location || ({} as any);
+      const lb = b.location || ({} as any);
+      const ka = `${(la.type||"").toLowerCase()}|${la.hallOrPlace||""}|${la.booth||""}`;
+      const kb = `${(lb.type||"").toLowerCase()}|${lb.hallOrPlace||""}|${lb.booth||""}`;
+      return ka.localeCompare(kb, "de", { numeric: true, sensitivity: "base" });
+    });
+
+    console.info(`[generate-plan] Formatiere Ausstellerabschnitt (Anzahl=${sortedFinal.length}) …`);
+    const exhibitorsOverviewContent = sortedFinal
+      .map((m, idx) => `${idx + 1}. ${m.name} — ${formatLoc(m)}`)
+      .join("\n");
+
+    const exhibitorsSectionContent = sortedFinal
+      .map((m, idx) => {
+        const website = (m as any).website ? String((m as any).website) : "";
+        const siteLine = website ? `\nWebsite: ${website}` : "";
+        return `${idx + 1}. **${m.name}**\n${formatLoc(m)}\n\n${m.profile || ""}${siteLine}`;
+      })
+      .join("\n\n");
+
+    const prompts = buildPrompts({ ...data });
 
     // Nacheinander, um pro Frage gezielt zu generieren
     const sections: { title: string; content: string }[] = [];
     for (const p of prompts) {
+      console.info(`[generate-plan] Generiere Abschnitt: ${p.title} → ${SECTIONS_MODEL} …`);
+      console.time(`section_${p.title}`);
       const completion = await client.chat.completions.create({
-        model: "gpt-4o-mini", // Platzhalter: bei GPT-5 Zugang hier tauschen
+        model: SECTIONS_MODEL,
         messages: [
           { role: "system", content: "Du bist ein Messe- und Event-Planungsassistent. Antworte prägnant auf Deutsch." },
           { role: "user", content: p.prompt },
         ],
-        temperature: 0.7,
       });
       const text = completion.choices[0]?.message?.content ?? "";
+      console.timeEnd(`section_${p.title}`);
       sections.push({ title: p.title, content: text });
     }
 
+    // Events auswählen und als Block an Tagesplanung anhängen
+    const selectedEvents = await selectEventsForUser(data.days, interestText, client);
+    if (selectedEvents.length > 0) {
+      const eventsBlock = selectedEvents
+        .sort((a, b) => `${a.date} ${a.time.start}`.localeCompare(`${b.date} ${b.time.start}`, "de"))
+        .map((e) => `• ${e.date} ${e.time.start}–${e.time.end}: ${e.title} (${e.location.hall || e.location.area || ""}${e.location.booth ? " " + e.location.booth : ""})`)
+        .join("\n");
+      sections.push({ title: "Empfohlene Events", content: eventsBlock });
+    }
+
+    // Übersicht direkt nach der Besuchsstrategie, Details ans Ende nach Tagesplanung
+    sections.splice(1, 0, { title: "Ausstellerübersicht", content: exhibitorsOverviewContent || "Keine passenden Aussteller gefunden." });
+    sections.push({ title: "Ausstellerdetails", content: exhibitorsSectionContent || "Keine passenden Aussteller gefunden." });
+
     // PDF erzeugen (als Buffer)
-    const pdfBuffer = await renderPlanToBuffer({
-      logoPath: `${process.cwd()}/public/tas_logo_2.png`,
-      answers: data,
-      sections,
+    console.info("[generate-plan] Rendere PDF …");
+    console.time("pdf_render");
+    // Hallenpläne sammeln: eindeutige Liste anhand type + hallOrPlace
+    const hallPlanDir = "/Users/bedranatug/TAS_IAA_Messe/Hallenplan";
+    const uniqueHalls = Array.from(new Set(sortedFinal.map((m) => `${(m.location?.type||"").trim()}|${(m.location?.hallOrPlace || "").trim()}`).filter((s) => s.includes("|"))));
+
+    // Feste Zuordnung der bekannten Hallenpläne → Datei
+    const MAP: Record<string, { pdf?: string; img?: string }> = {
+      // Summit
+      "Summit|Atrium": { pdf: `${hallPlanDir}/Summit_Atrium.pdf` },
+      "Summit|Halle A1": { pdf: `${hallPlanDir}/Summit_HalleA1.pdf` },
+      "Summit|Halle A2": { pdf: `${hallPlanDir}/Summit_HalleA2.pdf` },
+      "Summit|Halle A3": { pdf: `${hallPlanDir}/Summit_HalleA3.pdf` },
+      "Summit|Halle B1": { pdf: `${hallPlanDir}/Summit_HalleB1.pdf` },
+      "Summit|Halle B2": { pdf: `${hallPlanDir}/Summit_HalleB2.pdf` },
+      "Summit|Halle B3": { pdf: `${hallPlanDir}/Summit_HalleB3.pdf` },
+      // Open Space (verschiedene Plätze)
+      "Open Space|Königsplatz": { pdf: `${hallPlanDir}/Openspace_Koenigsplatz.pdf` },
+      "Open Space|Koenigsplatz": { pdf: `${hallPlanDir}/Openspace_Koenigsplatz.pdf` },
+      "Open Space|Ludwigstraße": { pdf: `${hallPlanDir}/Openspace_Ludwigstrasse.pdf` },
+      "Open Space|Ludwigstrasse": { pdf: `${hallPlanDir}/Openspace_Ludwigstrasse.pdf` },
+      "Open Space|Marienplatz": { pdf: `${hallPlanDir}/Openspace_Marienplatz.pdf` },
+      "Open Space|Max-Joseph-Platz": { pdf: `${hallPlanDir}/Openspace_Max-Joseph-Platz.pdf` },
+      "Open Space|Odeonsplatz": { pdf: `${hallPlanDir}/Openspace_Odeonsplatz.pdf` },
+      "Open Space|Residenzhöfe": { pdf: `${hallPlanDir}/Openspace_Residenzhoefe.pdf` },
+      "Open Space|Residenzhoefe": { pdf: `${hallPlanDir}/Openspace_Residenzhoefe.pdf` },
+      "Open Space|Wittelsbacherplatz": { pdf: `${hallPlanDir}/Openspace_Wittelsbacherplatz.pdf` },
+    };
+
+    const hallImagesOS: string[] = [];
+    const hallImagesSummit: string[] = [];
+    const hallPdfsOS: string[] = [];
+    const hallPdfsSummit: string[] = [];
+    uniqueHalls.forEach((pair) => {
+      const entry = MAP[pair];
+      if (!entry) return;
+      const isOS = pair.startsWith("Open Space|");
+      const isSummit = pair.startsWith("Summit|");
+      if (entry.img && fs.existsSync(entry.img)) {
+        if (isOS) hallImagesOS.push(entry.img); else if (isSummit) hallImagesSummit.push(entry.img);
+      }
+      if (entry.pdf && fs.existsSync(entry.pdf)) {
+        if (isOS) hallPdfsOS.push(entry.pdf); else if (isSummit) hallPdfsSummit.push(entry.pdf);
+      }
     });
 
-    // Direkt als PDF zurückgeben
-    const pdfBytes = new Uint8Array(pdfBuffer);
-    return new NextResponse(pdfBytes as unknown as BodyInit, {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": 'attachment; filename="messeplan.pdf"',
-        "Cache-Control": "no-store",
-      },
+    // Übersichtsbilder zuerst je Typ
+    const hallImages: string[] = [];
+    if (hallPdfsOS.length || hallImagesOS.length) {
+      const osOverview = `${hallPlanDir}/Openspace.png`;
+      if (fs.existsSync(osOverview)) hallImages.push(osOverview);
+      hallImages.push(...hallImagesOS);
+    }
+    if (hallPdfsSummit.length || hallImagesSummit.length) {
+      const summitOverview = `${hallPlanDir}/Summit.png`;
+      if (fs.existsSync(summitOverview)) hallImages.push(summitOverview);
+      hallImages.push(...hallImagesSummit);
+    }
+
+    // PDFs danach in der gleichen Gruppenreihenfolge
+    const hallPdfs: string[] = [...hallPdfsOS, ...hallPdfsSummit];
+
+    const pdfBuffer = await renderPlanToBuffer({
+      logoPath: `${process.cwd()}/public/tas_logo_2.png`,
+      answers: { ...(data as any), name: (data as any).name || "" } as any,
+      sections,
+      hallPlans: hallImages,
     });
+
+    // PDF-Hallenpläne ans Ende mergen (sofern vorhanden)
+    let finalBytes = new Uint8Array(pdfBuffer);
+    if (hallPdfs.length > 0) {
+      try {
+        // dynamischer Import ohne Typen, um Build-Probleme zu vermeiden
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { PDFDocument } = require("pdf-lib");
+        const master = await PDFDocument.load(finalBytes);
+        for (const p of hallPdfs) {
+          try {
+            const src = fs.readFileSync(p);
+            const doc = await PDFDocument.load(src);
+            const copied = await master.copyPages(doc, doc.getPageIndices());
+            copied.forEach((pg: any) => master.addPage(pg));
+          } catch (e) {
+            console.warn("[generate-plan] Konnte Hallen-PDF nicht hinzufügen:", p, e);
+          }
+        }
+        finalBytes = await master.save();
+      } catch (e) {
+        console.warn("[generate-plan] pdf-lib Merge deaktiviert/fehlgeschlagen:", e);
+      }
+    }
+
+    const pdfBytes = new Uint8Array(finalBytes);
+
+    // Falls E-Mail übergeben → per SMTP senden statt herunterladen
+    const recipient = (parsed.data.email || (parsed.data.data as any)?.email || parsed.data.email) as string | undefined;
+    if (recipient) {
+      try {
+        // 1) Bevorzugt: Microsoft Graph (App-Registrierung, kein zusätzlicher Dienst)
+        const ok = await sendViaMsGraph(recipient, pdfBytes);
+        if (!ok) {
+          // 2) Fallback: SMTP (falls konfiguriert)
+          const host = process.env.SMTP_HOST as string;
+          const port = parseInt(process.env.SMTP_PORT || "587", 10);
+          const user = process.env.SMTP_USER as string;
+          const pass = process.env.SMTP_PASS as string;
+          const from = process.env.MAIL_FROM as string;
+          if (!host || !user || !pass || !from) throw new Error("Graph und SMTP nicht konfiguriert");
+          const transporter = nodemailer.createTransport({ host, port, secure: port === 465, auth: { user, pass } });
+          await transporter.sendMail({
+            from,
+            to: recipient,
+            subject: "Ihr persönlicher Messeplan",
+            text: "Anbei Ihr persönlicher Messeplan als PDF.",
+            attachments: [{ filename: "messeplan.pdf", content: Buffer.from(pdfBytes), contentType: "application/pdf" }],
+          });
+        }
+        console.info(`[generate-plan] PDF an ${recipient} versendet (Graph${ok ? "" : "+SMTP Fallback"}).`);
+      } catch (e) {
+        console.error("[generate-plan] E-Mail Versand fehlgeschlagen:", e);
+        return NextResponse.json({ error: "E-Mail Versand fehlgeschlagen" }, { status: 500 });
+      }
+    }
+
+    // Persistieren (best-effort)
+    try {
+      if (supabase) {
+        const hallsUsed = Array.from(new Set(sortedFinal.map((m) => (m.location?.hallOrPlace || "").trim()).filter(Boolean)));
+        const exhibitorsOverview = sortedFinal.map((m) => ({ id: m.id, name: m.name, location: `${(m.location?.type||"").trim()} ${(m.location?.hallOrPlace||"").trim()} ${(m.location?.booth||"").trim()}`.trim() }));
+        const exhibitorsDetails = sortedFinal.map((m) => ({ id: m.id, name: m.name, location: `${(m.location?.type||"").trim()} ${(m.location?.hallOrPlace||"").trim()} ${(m.location?.booth||"").trim()}`.trim(), website: (m as any).website || null, profile: m.profile || null }));
+        await supabase.from("messe_plans").insert({
+          lang: (req.headers.get("accept-language") || "de").split(",")[0]?.startsWith("de") ? "de" : "en",
+          name: (data as any).name || null,
+          email: recipient || null,
+          role: data.role,
+          goal: data.goal,
+          exhibitors_text: data.exhibitorsText,
+          days: data.days,
+          must_see: data.mustSee,
+          extractor_model: process.env.EXTRACTOR_MODEL || null,
+          validation_model: process.env.VALIDATION_MODEL || null,
+          validation_pool_limit: parseInt(process.env.VALIDATION_POOL_LIMIT || "0", 10) || null,
+          default_top_n: parseInt(process.env.DEFAULT_TOP_N || "0", 10) || null,
+          struct_phrases: structPhrases || [],
+          struct_domains: structDomains || [],
+          struct_company_type: structCompany || null,
+          exhibitors_overview: exhibitorsOverview,
+          exhibitors_details: exhibitorsDetails,
+          halls_used: hallsUsed,
+          pdf_size_bytes: pdfBytes.byteLength,
+          duration_ms: undefined,
+        });
+      }
+    } catch (e) {
+      console.warn("[generate-plan] Supabase insert fehlgeschlagen:", e);
+    }
+    console.timeEnd("pdf_render");
+    console.info("[generate-plan] DONE (PDF gesendet)");
+    // Bei E-Mail-Versand nur 200/JSON zurückgeben, sonst PDF (Fallback)
+    if (recipient) {
+      return NextResponse.json({ ok: true });
+    }
+    return new NextResponse(pdfBytes as unknown as BodyInit, { status: 200, headers: { "Content-Type": "application/pdf" } });
   } catch (e) {
-    console.error(e);
+    console.error("[generate-plan] ERROR:", e);
     return NextResponse.json({ error: "Unerwarteter Fehler" }, { status: 500 });
   }
 }

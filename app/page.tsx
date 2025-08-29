@@ -1,9 +1,11 @@
 "use client";
 import Image from "next/image";
-import { useMemo, useState } from "react";
-import { EXHIBITORS } from "@/lib/data/exhibitors";
+import { useMemo, useState, useEffect } from "react";
+import { EXHIBITORS_DB } from "@/lib/data/exhibitors_db";
 
 type QuestionnaireData = {
+  name?: string;
+  email?: string;
   role: string | null;
   goal: string | null;
   exhibitorsText: string;
@@ -11,36 +13,57 @@ type QuestionnaireData = {
   mustSee: string[];
 };
 
-const ROLES = [
-  "Geschäftsführung / Vorstand (C-Level)",
-  "Bereichs- / Abteilungsleitung",
-  "Werks- / Standortleitung",
-  "Projektmanager/in / Fachspezialist/in",
-  "Studierende / Young Professional",
-  "Presse / Medien",
-];
+const ROLES_DICT: Record<"de"|"en", string[]> = {
+  de: [
+    "Geschäftsführung / Vorstand (C-Level)",
+    "Bereichs- / Abteilungsleitung",
+    "Werks- / Standortleitung",
+    "Projektmanager/in / Fachspezialist/in",
+    "Studierende / Young Professional",
+    "Presse / Medien",
+  ],
+  en: [
+    "Executive / C-level",
+    "Head of department",
+    "Plant / site management",
+    "Project manager / Specialist",
+    "Student / Young professional",
+    "Press / Media",
+  ],
+};
 
-const GOALS = [
-  "Produkte vergleichen",
-  "Partner & Lieferanten finden",
-  "Tech-Insights & Demos erleben",
-  "Karriere & Jobs",
-  "Medienarbeit",
-  "Inspiration & Überblick",
-];
+const GOALS_DICT: Record<"de"|"en", string[]> = {
+  de: [
+    "Produkte vergleichen",
+    "Partner & Lieferanten finden",
+    "Tech-Insights & Demos erleben",
+    "Karriere & Jobs",
+    "Medienarbeit",
+    "Inspiration & Überblick",
+  ],
+  en: [
+    "Compare products",
+    "Find partners & suppliers",
+    "See tech insights & demos",
+    "Careers & jobs",
+    "Media work",
+    "Inspiration & overview",
+  ],
+};
 
-const DAYS = [
-  "09. September",
-  "10. September",
-  "11. September",
-  "12. September",
-];
+const DAYS_DICT: Record<"de"|"en", string[]> = {
+  de: ["09. September", "10. September", "11. September", "12. September"],
+  en: ["September 9", "September 10", "September 11", "September 12"],
+};
 
 export default function Home() {
   const [step, setStep] = useState<"form" | "download" | "done">("form");
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [lang, setLang] = useState<"de" | "en">("de");
   const [data, setData] = useState<QuestionnaireData>({
+    name: "",
+    email: "",
     role: null,
     goal: null,
     exhibitorsText: "",
@@ -48,9 +71,21 @@ export default function Home() {
     mustSee: [],
   });
 
+  const ALL_EXHIBITOR_NAMES = useMemo(() => {
+    return Array.from(
+      new Set(
+        (EXHIBITORS_DB || [])
+          .map((e) => (e?.name || "").trim())
+          .filter((n) => n.length > 0)
+      )
+    ).sort((a, b) => a.localeCompare(b, "de"));
+  }, []);
+
   const exhibitorsSuggestions = useMemo(() => {
-    return EXHIBITORS.filter((p) => p.toLowerCase().includes(search.toLowerCase()));
-  }, [search]);
+    const q = search.toLowerCase();
+    if (!q) return [] as string[];
+    return ALL_EXHIBITOR_NAMES.filter((p) => p.toLowerCase().includes(q));
+  }, [search, ALL_EXHIBITOR_NAMES]);
 
   async function handleSubmit() {
     setStep("download");
@@ -62,18 +97,9 @@ export default function Home() {
       const res = await fetch("/api/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ data }),
+        body: JSON.stringify({ email: data.email, data }),
       });
-      if (!res.ok) throw new Error("Fehler beim Erstellen");
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "messeplan.pdf";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      window.URL.revokeObjectURL(url);
+      if (!res.ok) throw new Error("Fehler beim Erstellen/Versand");
       setStep("done");
     } catch {
       alert("Senden fehlgeschlagen. Bitte erneut versuchen.");
@@ -83,7 +109,50 @@ export default function Home() {
   }
 
   const isFormValid = data.role && data.goal && data.days.length > 0;
-  const isEmailValid = true;
+  const isEmailValid = !!data.email && /.+@.+\..+/.test(data.email);
+
+  // einfache Übersetzungen
+  const t = (key: string) => {
+    const dict: Record<string, Record<string, string>> = {
+      de: {
+        title: "Ihr persönlicher Messeplaner",
+        tagline: "We get it done – every time, everywhere.",
+        profileHeading: "Ihr Profil und Messeziele",
+        q1: "1. Welche Rolle beschreibt Sie am besten?",
+        q2: "2. Was möchten Sie mit Ihrem Messebesuch erreichen?",
+        q3: "3. Bitte geben Sie mir Input zu den Ausstellern die Sie interessieren.",
+        q4: "4. An welchen Tagen sind Sie auf der Messe?",
+        q5: "5. Optional: Marken oder Stände, die Sie auf jeden Fall sehen möchten?",
+        submit: "Absenden",
+        back: "Zurück",
+        downloadTitle: "Ihr persönlicher Messeplan ist fertig – jetzt als PDF herunterladen",
+        downloadBtn: "PDF herunterladen",
+        creating: "Erstelle PDF ...",
+        consent: "Mit Absenden stimmen Sie der Verarbeitung gemäß Datenschutzhinweisen zu.",
+        searchPh: "Suche nach Ausstellern",
+        langToggle: "EN",
+      },
+      en: {
+        title: "Your personal trade fair planner",
+        tagline: "We get it done – every time, everywhere.",
+        profileHeading: "Your profile and goals",
+        q1: "1. Which role describes you best?",
+        q2: "2. What is your goal for the visit?",
+        q3: "3. Please provide input about the exhibitors you are interested in.",
+        q4: "4. On which days will you attend?",
+        q5: "5. Optional: Any brands/booths you must see?",
+        submit: "Submit",
+        back: "Back",
+        downloadTitle: "Your plan is ready – download the PDF now",
+        downloadBtn: "Download PDF",
+        creating: "Generating PDF ...",
+        consent: "By submitting you agree to our privacy policy.",
+        searchPh: "Search exhibitors",
+        langToggle: "DE",
+      },
+    };
+    return dict[lang][key] || key;
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -91,13 +160,20 @@ export default function Home() {
         className="w-full"
         style={{ backgroundColor: "var(--tas-dark-blue)", color: "white" }}
       >
-        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-8 py-12 px-6">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center gap-8 py-12 px-6 relative">
+          <button
+            className="absolute right-6 top-6 tas-chip"
+            onClick={() => setLang((l) => (l === "de" ? "en" : "de"))}
+            title={lang === "de" ? "Switch to English" : "Auf Deutsch umstellen"}
+          >
+            {t("langToggle")}
+          </button>
           <div className="shrink-0">
             <Image src="/tas_logo.png" alt="T.A.S. FORCE" width={140} height={140} priority />
           </div>
           <div className="flex-1">
-            <h1 className="text-3xl md:text-4xl font-semibold leading-tight">Ihr persönlicher Messeplaner</h1>
-            <p className="mt-3 text-white/80">We get it done – every time, everywhere.</p>
+            <h1 className="text-3xl md:text-4xl font-semibold leading-tight">{t("title")}</h1>
+            <p className="mt-3 text-white/80">{t("tagline")}</p>
             <div className="mt-4 h-1 w-24" style={{ backgroundColor: "var(--tas-turquoise)" }} />
           </div>
         </div>
@@ -107,14 +183,12 @@ export default function Home() {
         <div className="bg-white rounded-xl shadow-xl border border-[var(--tas-light-grey)] p-6 md:p-8">
         {step === "form" && (
           <section className="space-y-8">
-            <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>
-              Ihr Profil und Messeziele
-            </h2>
+            <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>{t("profileHeading")}</h2>
 
             <div className="space-y-3">
-              <label className="block font-medium">1) Welche Rolle beschreibt Sie am besten?</label>
+              <label className="block font-medium">{t("q1")}</label>
               <div className="flex flex-wrap gap-2">
-                {ROLES.map((r) => (
+                {(ROLES_DICT[lang]).map((r) => (
                   <button
                     key={r}
                     type="button"
@@ -128,9 +202,9 @@ export default function Home() {
             </div>
 
             <div className="space-y-3">
-              <label className="block font-medium">2) Was möchten Sie mit Ihrem Messebesuch erreichen?</label>
+              <label className="block font-medium">{t("q2")}</label>
               <div className="flex flex-wrap gap-2">
-                {GOALS.map((g) => (
+                {(GOALS_DICT[lang]).map((g) => (
                   <button
                     key={g}
                     type="button"
@@ -144,20 +218,20 @@ export default function Home() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium">3) Geben Sie mir Input zu den Ausstellern die Sie interessieren.</label>
+              <label className="block font-medium">{t("q3")}</label>
               <textarea
                 className="w-full rounded-md border p-3"
                 rows={4}
-                placeholder="Freitext: Themen, Technologien, Branchen, Aussteller ..."
+                placeholder={lang === "de" ? "Freitext: Themen, Technologien, Branchen, Aussteller ..." : "Free text: topics, technologies, industries, exhibitors ..."}
                 value={data.exhibitorsText}
                 onChange={(e) => setData((d) => ({ ...d, exhibitorsText: e.target.value }))}
               />
             </div>
 
             <div className="space-y-3">
-              <label className="block font-medium">4) An welchen Tagen sind Sie auf der Messe?</label>
+              <label className="block font-medium">{t("q4")}</label>
               <div className="flex flex-wrap gap-2">
-                {DAYS.map((day) => {
+                {(DAYS_DICT[lang]).map((day) => {
                   const active = data.days.includes(day);
                   return (
                     <button
@@ -179,10 +253,10 @@ export default function Home() {
             </div>
 
             <div className="space-y-2">
-              <label className="block font-medium">5) Optional: Marken oder Stände, die Sie auf jeden Fall sehen möchten?</label>
+              <label className="block font-medium">{t("q5")}</label>
               <input
                 className="w-full rounded-md border p-2"
-                placeholder="Suche nach Ausstellern"
+                placeholder={t("searchPh")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -230,14 +304,42 @@ export default function Home() {
 
             <div className="pt-4 flex flex-col md:flex-row gap-3 md:gap-0 justify-between items-start md:items-center">
               <span className="text-sm" style={{ color: "var(--tas-grey)" }}>
-                Mit Absenden stimmen Sie der Verarbeitung gemäß Datenschutzhinweisen zu.
+                {lang === "de"
+                  ? (
+                    <>
+                      Mit Absenden stimmen Sie der Verarbeitung gemäß {" "}
+                      <a
+                        href="https://tas-force.com/de/datenschutz/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                        style={{ color: "var(--tas-dark-blue)" }}
+                      >
+                        Datenschutzhinweisen
+                      </a>{" "}zu.
+                    </>
+                  )
+                  : (
+                    <>
+                      By submitting you agree to our {" "}
+                      <a
+                        href="https://tas-force.com/de/datenschutz/"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="underline"
+                        style={{ color: "var(--tas-dark-blue)" }}
+                      >
+                        privacy policy
+                      </a>.
+                    </>
+                  )}
               </span>
               <button
                 disabled={!isFormValid}
                 className="tas-btn-primary disabled:opacity-50"
                 onClick={handleSubmit}
               >
-                Weiter
+                {t("submit")}
               </button>
             </div>
           </section>
@@ -245,17 +347,34 @@ export default function Home() {
 
         {step === "download" && (
           <section className="space-y-6">
-            <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>
-              Ihr persönlicher Messeplan ist fertig – jetzt als PDF herunterladen
-            </h2>
+            <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>{t("downloadTitle")}</h2>
+            <div className="space-y-2">
+              <label className="block font-medium">{lang === "de" ? "Ihr Name" : "Your name"}</label>
+              <input
+                className="w-full rounded-md border p-2"
+                placeholder={lang === "de" ? "Vor- und Nachname" : "First and last name"}
+                value={data.name || ""}
+                onChange={(e) => setData((d) => ({ ...d, name: e.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="block font-medium">{lang === "de" ? "Ihre E-Mail-Adresse" : "Your email address"}</label>
+              <input
+                className="w-full rounded-md border p-2"
+                placeholder={lang === "de" ? "name@example.com" : "name@example.com"}
+                value={data.email || ""}
+                onChange={(e) => setData((d) => ({ ...d, email: e.target.value }))}
+                type="email"
+              />
+            </div>
             <div className="flex items-center justify-end gap-3">
-              <button className="tas-chip" onClick={() => setStep("form")}>Zurück</button>
+              <button className="tas-chip" onClick={() => setStep("form")}>{t("back")}</button>
               <button
                 className="tas-btn-primary disabled:opacity-50"
                 onClick={handleSend}
                 disabled={!isEmailValid || loading}
               >
-                {loading ? "Erstelle PDF ..." : "PDF herunterladen"}
+                {loading ? (lang === "de" ? "Sende per E‑Mail …" : "Sending via email …") : (lang === "de" ? "Per E‑Mail erhalten" : "Send by email")}
               </button>
             </div>
           </section>
