@@ -12,7 +12,6 @@ type QuestionnaireData = {
   exhibitorsText: string;
   days: string[];
   mustSee: string[];
-  email: string; 
 };
 
 const ROLES_DICT: Record<"de"|"en", string[]> = {
@@ -71,7 +70,6 @@ export default function Home() {
     exhibitorsText: "",
     days: [],
     mustSee: [],
-    email: "", 
   });
 
    async function sendMesseplanEmail(
