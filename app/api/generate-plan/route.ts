@@ -418,7 +418,7 @@ export async function POST(req: NextRequest) {
     console.info("[generate-plan] Rendere PDF …");
     console.time("pdf_render");
     // Hallenpläne sammeln: eindeutige Liste anhand type + hallOrPlace
-    const hallPlanDir = "/Users/bedranatug/TAS_IAA_Messe/Hallenplan";
+    const hallPlanDir = "./Hallenplan";
     const uniqueHalls = Array.from(new Set(sortedFinal.map((m) => `${(m.location?.type||"").trim()}|${(m.location?.hallOrPlace || "").trim()}`).filter((s) => s.includes("|"))));
 
     // Feste Zuordnung der bekannten Hallenpläne → Datei
