@@ -1,6 +1,7 @@
 "use client";
 import Image from "next/image";
 import { useMemo, useState, useEffect } from "react";
+import emailjs from "@emailjs/browser";
 import { EXHIBITORS_DB } from "@/lib/data/exhibitors_db";
 
 type QuestionnaireData = {
@@ -11,6 +12,7 @@ type QuestionnaireData = {
   exhibitorsText: string;
   days: string[];
   mustSee: string[];
+  email: string; // ✅ added
 };
 
 const ROLES_DICT: Record<"de"|"en", string[]> = {
@@ -69,7 +71,80 @@ export default function Home() {
     exhibitorsText: "",
     days: [],
     mustSee: [],
+    email: "", // ✅ added
   });
+
+   async function sendMesseplanEmail(
+  data: { email: string },
+  pdfBytes: Uint8Array
+) {
+  const SERVICE_ID = 'service_prmgrzf';
+  const TEMPLATE_ID = 'template_52c1f0x';
+  const PUBLIC_KEY = 'MomY4mAH_xZr1KbyP';
+
+  // 1) Must run on the client (browser)
+  if (typeof window === 'undefined' || typeof document === 'undefined') {
+    throw new Error('sendForm must run in the browser (no SSR/API route).');
+  }
+
+  // 2) Init (safe to call more than once)
+  emailjs.init(PUBLIC_KEY);
+
+  // 3) Create a hidden form and ATTACH it to the DOM
+  const form = document.createElement('form');
+  form.style.display = 'none';
+  form.enctype = 'multipart/form-data';
+  document.body.appendChild(form);
+
+  const addHidden = (name: string, value: string) => {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = value;
+    form.appendChild(input);
+  };
+
+  // 4) Only tiny variables
+  addHidden('to_email', data.email);
+  addHidden('subject', 'Ihr persönlicher Messeplan');
+  addHidden('message', 'Vielen Dank! Wir haben Ihre Angaben erhalten. Ihr persönlicher Messeplan wird jetzt erstellt.');
+
+  // 5) Build the File and programmatically set it on a file input
+  const file = new File([pdfBytes], 'Messeplan.pdf', { type: 'application/pdf' });
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.name = 'my_file'; // must equal template parameter
+  fileInput.accept = 'application/pdf';
+
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  fileInput.files = dt.files;
+  form.appendChild(fileInput);
+
+  // 6) Diagnostics (optional but useful)
+  const fd = new FormData(form);
+  let varBytes = 0;
+  for (const [k, v] of fd.entries()) {
+    if (v instanceof File) continue;
+    varBytes += new TextEncoder().encode(String(v)).length;
+  }
+  console.log('Template variables size (bytes):', varBytes); // should be tiny (<1KB)
+  console.log('Attachment size (MB):', (file.size / (1024 * 1024)).toFixed(2));
+
+  // If > ~10MB, many providers will bounce it. Consider compressing or sending a link instead.
+  if (file.size > 10 * 1024 * 1024) {
+    console.warn('PDF likely too large for mail providers (>10MB). Consider compressing.');
+  }
+
+  try {
+    // 7) Send the form. Pass PUBLIC_KEY again for certainty.
+    const res = await emailjs.sendForm(SERVICE_ID, TEMPLATE_ID, form, PUBLIC_KEY);
+    return res;
+  } finally {
+    // 8) Clean up DOM
+    document.body.removeChild(form);
+  }
+}
 
   const ALL_EXHIBITOR_NAMES = useMemo(() => {
     return Array.from(
@@ -91,17 +166,36 @@ export default function Home() {
     setStep("download");
   }
 
+  // Basic email check
+  const isEmailValid = /^\S+@\S+\.\S+$/.test(data.email || "");
+
   async function handleSend() {
     try {
       setLoading(true);
+
+      // 1) Generate and download the PDF
       const res = await fetch("/api/generate-plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email: data.email, data }),
       });
-      if (!res.ok) throw new Error("Fehler beim Erstellen/Versand");
+      if (!res.ok) throw new Error("Fehler beim Erstellen");
+      const blob = await res.blob();
+      // const url = window.URL.createObjectURL(blob);
+      // const a = document.createElement("a");
+      // a.href = url;
+      // a.download = "messeplan.pdf";
+      // document.body.appendChild(a);
+      // a.click();
+      // a.remove();
+      // window.URL.revokeObjectURL(url);
+    
+      // 1) Send a generic email via EmailJS
+      await sendMesseplanEmail(data, blob)
+
       setStep("done");
-    } catch {
+    } catch (err) {
+      console.error(err);
       alert("Senden fehlgeschlagen. Bitte erneut versuchen.");
     } finally {
       setLoading(false);
@@ -380,16 +474,16 @@ export default function Home() {
           </section>
         )}
 
-        {step === "done" && (
-          <section className="space-y-4 text-center">
-            <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>
-              Vielen Dank! Ihr persönlicher Messeplan ist unterwegs.
-            </h2>
-            <p className="text-sm" style={{ color: "var(--tas-grey)" }}>
-              Bitte prüfen Sie Ihren Posteingang. Falls nichts ankommt, schauen Sie im Spam-Ordner nach.
-            </p>
-          </section>
-        )}
+          {step === "done" && (
+            <section className="space-y-4 text-center">
+              <h2 className="text-lg font-semibold" style={{ color: "var(--tas-dark-blue)" }}>
+                Vielen Dank! Ihr persönlicher Messeplan ist unterwegs.
+              </h2>
+              <p className="text-sm" style={{ color: "var(--tas-grey)" }}>
+                Bitte prüfen Sie Ihren Posteingang. Falls nichts ankommt, schauen Sie im Spam-Ordner nach.
+              </p>
+            </section>
+          )}
         </div>
       </main>
     </div>
