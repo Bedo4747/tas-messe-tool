@@ -396,19 +396,15 @@ export async function POST(req: NextRequest) {
 
     // Events auswählen und als eigenen Abschnitt hinzufügen
     const selectedEvents = await selectEventsForUser(data.days, interestText, client);
+    console.info(`[generate-plan] Events gewählt: ${selectedEvents.length} (input days=${(data.days||[]).join('|')})`);
     if (selectedEvents.length > 0) {
       const eventsBlock = selectedEvents
         .sort((a, b) => `${a.date} ${a.time.start}`.localeCompare(`${b.date} ${b.time.start}`, lang === "de" ? "de" : "en"))
         .map((e) => {
-          const m = e.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-          let dateOut = e.date;
-          if (m) {
-            const [, y, mm, dd] = m;
-            dateOut = lang === "de" ? `${dd}.${mm}.${y}` : `September ${parseInt(dd, 10)}`;
-          }
+          // Wichtig: ISO-Datum belassen, damit die PDF-Tabelle es zuverlässig parsen und lokalisieren kann
           const place = e.location.hall || e.location.area || "";
           const loc = place + (e.location.booth ? ` ${e.location.booth}` : "");
-          return `• ${dateOut} ${e.time.start}–${e.time.end}: ${e.title} (${loc})`;
+          return `• ${e.date} ${e.time.start}–${e.time.end}: ${e.title} (${loc})`;
         })
         .join("\n");
       sections.push({ title: lang === "de" ? "Empfohlene Events" : "Recommended events", content: eventsBlock });

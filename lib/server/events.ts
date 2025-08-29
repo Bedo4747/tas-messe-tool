@@ -27,11 +27,15 @@ export async function selectEventsForUser(
   // Tage ("09. September" etc.) in Tag-Strings umwandeln
   const normalize = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
   const allowedDays = new Set(days.map((d) => normalize(d)));
-  const filtered = EVENTS_DB.filter((e) => {
-    const de = normalize(dayLabelFromDate(e.date));
-    const en = normalize(dayLabelEnFromDate(e.date));
-    return allowedDays.has(de) || allowedDays.has(en);
-  });
+
+  const allowedIso = new Set(days.map(d => d.trim()));
+  const filtered = EVENTS_DB.filter(e => allowedIso.has(e.date));
+  // // const filtered = EVENTS_DB.filter((e) => {
+  // //   const de = normalize(dayLabelFromDate(e.date));
+  // //   const en = normalize(dayLabelEnFromDate(e.date));
+  // //   return allowedDays.has(de) || allowedDays.has(en);
+  // // });
+  // const filtered = EVENTS_DB;
   if (filtered.length === 0) return [];
 
   // In parallelen Chunks an GPT-5: nur Felder date/time/title/summary

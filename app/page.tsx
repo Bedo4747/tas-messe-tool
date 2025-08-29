@@ -52,6 +52,23 @@ const GOALS_DICT: Record<"de"|"en", string[]> = {
   ],
 };
 
+
+const DAYS_LABELS: Record<"de"|"en", { label: string; iso: string }[]> = {
+  de: [
+    { label: "09. September", iso: "2025-09-09" },
+    { label: "10. September", iso: "2025-09-10" },
+    { label: "11. September", iso: "2025-09-11" },
+    { label: "12. September", iso: "2025-09-12" },
+  ],
+  en: [
+    { label: "September 9", iso: "2025-09-09" },
+    { label: "September 10", iso: "2025-09-10" },
+    { label: "September 11", iso: "2025-09-11" },
+    { label: "September 12", iso: "2025-09-12" },
+  ],
+};
+
+
 const DAYS_DICT: Record<"de"|"en", string[]> = {
   de: ["09. September", "10. September", "11. September", "12. September"],
   en: ["September 9", "September 10", "September 11", "September 12"],
@@ -304,24 +321,22 @@ export default function Home() {
             <div className="space-y-3">
               <label className="block font-medium">{t("q4")}</label>
               <div className="flex flex-wrap gap-2">
-                {(DAYS_DICT[lang]).map((day) => {
-                  const active = data.days.includes(day);
-                  return (
-                    <button
-                      key={day}
-                      type="button"
-                      className={`tas-chip ${active ? "tas-chip-active" : ""}`}
-                      onClick={() =>
-                        setData((d) => ({
-                          ...d,
-                          days: active ? d.days.filter((x) => x !== day) : [...d.days, day],
-                        }))
-                      }
-                    >
-                      {day}
-                    </button>
-                  );
-                })}
+              {DAYS_LABELS[lang].map(({label, iso}) => {
+                const active = data.days.includes(iso);
+                return (
+                  <button
+                    key={iso}
+                    type="button"
+                    className={`tas-chip ${active ? "tas-chip-active" : ""}`}
+                    onClick={() => setData(d => ({
+                      ...d,
+                      days: active ? d.days.filter(x => x !== iso) : [...d.days, iso],
+                    }))}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
               </div>
             </div>
 

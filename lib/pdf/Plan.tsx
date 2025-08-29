@@ -256,6 +256,12 @@ function EventsTable({ content }: { content: string }) {
     const [_, y, mm, dd] = m;
     return `${dd}.${mm}.${y}`;
   };
+  const toEnDate = (iso: string) => {
+    const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!m) return iso;
+    const dd = String(parseInt(m[3], 10));
+    return `September ${dd}`;
+  };
 
   const rows = content
     .split(/\n+/)
@@ -263,9 +269,10 @@ function EventsTable({ content }: { content: string }) {
     .filter((l) => l.length > 0)
     .map((l) => {
       // • 2024-09-09 10:00–11:00: Titel (Ort)
-      const m = l.match(/^\s*[•\-]\s+(\d{4}-\d{2}-\d{2})\s+([0-9]{1,2}:[0-9]{2})\s*[–-]\s*([0-9]{1,2}:[0-9]{2}):\s+(.*?)(?:\s*\((.*?)\))?\s*$/);
+      const m = l.match(/^\s*[•\-]\s+(\d{4}-\d{2}-\d{2})\s+([0-9]{1,2}:[0-9]{2})\s*[–\-]\s*([0-9]{1,2}:[0-9]{2}):\s+(.*?)(?:\s*\((.*?)\))?\s*$/);
       if (!m) return null;
-      const date = toDeDate(m[1]);
+      // Sprache nicht verfügbar – rendern neutral (EN Format). Optional könnte hier ein lang-Prop genutzt werden.
+      const date = toEnDate(m[1]);
       const start = m[2];
       const end = m[3];
       const title = m[4];
