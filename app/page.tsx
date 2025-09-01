@@ -124,7 +124,13 @@ export default function Home() {
 
     addHidden('to_email', data.email);
     addHidden('subject', 'Ihr persönlicher Messeplan für die IAA MOBILITY 2025');
-    addHidden('message', 'Vielen Dank für Ihre Angaben im Messeformular. Auf dieser Basis habe ich für Sie einen individuellen Messeplan erstellt – mit Strategieempfehlungen, relevanten Ausstellern samt Standorten sowie passenden Events nach Tagen und Themen. Ziel ist es, Ihren Besuch auf der IAA MOBILITY so effizient und wirkungsvoll wie möglich zu gestalten.  Den persönlichen Messebericht finden Sie im Anhang.');
+    addHidden('message', `Anbei erhalten Sie Ihren individuellen Messeplan für die IAA – erstellt auf Basis Ihrer Angaben und übersichtlich für Sie zusammengestellt. Damit haben Sie alle für Sie relevanten Themen, Aussteller und Termine jederzeit im Blick.
+ 
+Nutzen Sie die Gelegenheit, uns persönlich zu treffen:
+Besuchen Sie uns in Halle A1 an Stand C10. Wir freuen uns auf den direkten Austausch mit Ihnen.
+ 
+Mit besten Grüßen
+Ihr Team von T.A.S. FORCE`);
 
     const file = new File([pdfBytes], 'Messeplan.pdf', { type: 'application/pdf' });
     const fileInput = document.createElement('input');
