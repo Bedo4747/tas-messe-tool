@@ -206,7 +206,7 @@ Ihr Team von T.A.S. FORCE`);
     })();
   }
 
-  const isFormValid = data.role && data.goal && data.days.length > 0;
+  const isFormValid = data.role && data.goal && data.days.length > 0 && data.exhibitorsText.trim();
 
   const t = (key: string) => {
     const dict: Record<string, Record<string, string>> = {

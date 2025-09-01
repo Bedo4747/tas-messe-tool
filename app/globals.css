@@ -11,6 +11,8 @@
 
   --background: #ffffff;
   --foreground: var(--tas-black);
+
+  color-scheme: light;
 }
 
 @theme inline {
@@ -23,12 +25,12 @@
   --font-sans: var(--font-work-sans);
 }
 
-@media (prefers-color-scheme: dark) {
+/* @media (prefers-color-scheme: dark) {
   :root {
     --background: #0a0f14;
     --foreground: #e6e6e6;
   }
-}
+} */
 
 body {
   background: var(--background);
