@@ -106,7 +106,7 @@ KPIs – Top 3:
 • <KPI 2, measurable and realistic>
 • <KPI 3, measurable and realistic>
 Rules (apply, do not output):
-    •    Each line ends with the verb (e.g., "prepare RFQ question set")
+    •    Each line has a verb (e.g., "prepare RFQ question set")
     •    Use numbers/deadlines (Top-3, 48 hours, 14 days)
     •    Realistic per-day KPIs, adapted to role/goal
     ◦    C-level: 1–3 high-impact KPIs (exclusive meetings, pilot decision)
