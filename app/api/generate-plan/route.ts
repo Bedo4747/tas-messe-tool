@@ -80,7 +80,7 @@ Regeln (anwenden, nicht ausgeben):
     •    Keine Marken, keine Füllwörter, keine Wiederholungen, nur Wichtigstes
     •    Jede Zeile trimmen, max. 12 Wörter, keine Endpunkte`;
   const promptEn = `Task:
-Create an ultra-compact action plan strictly from role and fair goal. Use only these inputs. Bullets in object-verb style (object first, verb at the end), max 12 words, no period. Use the bullet character "• ". Output exactly the format below, no extra text or placeholders. Sort bullets by impact. Avoid duplicates.
+Create an ultra-compact action plan strictly from role and fair goal. Use only these inputs. Bullets must start with a verb followed by the object (verb–object style). Each bullet max 12 words, no period. Use the bullet character "• ". Output exactly the format below, no extra text or placeholders. Sort bullets by impact. Avoid duplicates.
 Inputs:
     •    Role: ${roleOut}
     •    Goal: ${goalOut}
